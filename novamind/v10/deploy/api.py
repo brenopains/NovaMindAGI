@@ -263,10 +263,11 @@ manager = ConnectionManager()
 
 async def autonomous_mind_loop():
     manager.autonomous_loop_running = True
-    print("[MIND] Initializing massive Multimodal HuggingFace Streams...")
+    print("[MIND] Initializing MASSIVE Multimodal HuggingFace Streams (FineWeb / MNIST / LibriSpeech)...")
     
     try:
-        ds_text = load_dataset("wikitext", "wikitext-2-v1", split="train", streaming=True)
+        # Puxando o FineWeb (O mesmo que treinou o Llama 3) para Inteligência de texto real
+        ds_text = load_dataset("HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
         ds_vision = load_dataset("mnist", split="train", streaming=True)
         ds_audio = load_dataset("openslr/librispeech_asr", "default", split="validation", revision="refs/convert/parquet", streaming=True)
         
@@ -283,8 +284,9 @@ async def autonomous_mind_loop():
     best_loss = 999.0
     
     while True:
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(0.01) # Yield to event loop slightly
         if not manager.active_connections:
+            await asyncio.sleep(1.0)
             continue
             
         try:
@@ -296,11 +298,13 @@ async def autonomous_mind_loop():
             img_tensor = trans_vis(img_sample).unsqueeze(0) # [1, 3, 64, 64]
             
             audio_sample = next(audio_iter)['audio']['array']
-            # crop audio to fixed length (e.g., 2000 samples)
             audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0)
         except StopIteration:
-            # Re-initialize streams if they run out (unlikely with streaming but acts as safety)
             text_iter = iter(ds_text); vision_iter = iter(ds_vision); audio_iter = iter(ds_audio)
+            continue
+        except Exception as e:
+            print(f"[MIND EXCEPTION]: {e}")
+            await asyncio.sleep(1.0)
             continue
             
         words = text_sample.split()
