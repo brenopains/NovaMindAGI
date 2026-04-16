@@ -299,14 +299,18 @@ async def autonomous_mind_loop():
             brain_state = tensor_step(input_text=context, input_image=img_tensor, input_audio=audio_cropped, is_autonomous=True, target_text=target)
             accumulated_loss += brain_state["loss_val"]
             
-            payload = json.dumps({"type": "brain_cycle", "data": brain_state})
-            for conn in manager.active_connections.copy():
-                try:
-                    await conn.send_text(payload)
-                except WebSocketDisconnect:
-                    manager.disconnect(conn)
+            # Throttle WebSocket Broadcasts to prevent Pinggy DDoS drops (Send 1 in every 5 steps)
+            if i % 5 == 0:
+                payload = json.dumps({"type": "brain_cycle", "data": brain_state})
+                for conn in manager.active_connections.copy():
+                    try:
+                        await conn.send_text(payload)
+                    except WebSocketDisconnect:
+                        manager.disconnect(conn)
+                    except Exception as e:
+                        print(f"WS Send Error: {e}")
             
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.01) # Yield minimally, max GPU speed!
             
         torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
         optimizer.step()

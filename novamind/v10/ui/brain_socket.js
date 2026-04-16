@@ -206,138 +206,106 @@ inputField.addEventListener('keypress', e => {
     if(e.key === 'Enter') sendInput();
 });
 
-ws.onopen = () => {
-    sysStatus.textContent = "SYS.ONLINE";
-    appendMsg("Neural link connected on Port 8000.", "sys");
-};
+function connectToCore() {
+    const ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
-ws.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
+    ws.onopen = () => {
+        sysStatus.textContent = "SYS.ONLINE";
+        appendMsg("Neural link connected on Port 8000.", "sys");
+        
+        // Keep-alive heartbeat para túneis Pinggy/Ngrok
+        window.pingInterval = setInterval(() => {
+            if (ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({type: "ping"}));
+            }
+        }, 15000);
+    };
+
+    ws.onmessage = (event) => {
+        const payload = JSON.parse(event.data);
+        
+        if (payload.type === 'status' && payload.message === 'processing') {
+            sysStatus.textContent = "COGNITION.ACTIVE";
+            statusWrapper.classList.add('active');
+            statusWrapper.querySelector('.dot').classList.add('pulse-anim');
+        }
+        
+        if (payload.type === 'brain_cycle') {
+            const data = payload.data;
+            
+            sysStatus.textContent = "SYS.IDLE";
+            statusWrapper.classList.remove('active');
+            statusWrapper.querySelector('.dot').classList.remove('pulse-anim');
+            
+            if(moeIdx) moeIdx.textContent = `EXPERT_${(data.moe_expert_idx || 0).toString().padStart(2, '0')}`;
+            if(memIdx) memIdx.textContent = `0x${(data.mem_index || 0).toString(16).toUpperCase()}`;
+            
+            symbAst.innerHTML = '';
+            if(symbProg) {
+                symbAst.appendChild(symbProg);
+                symbProg.textContent = data.symbolic_prog || '[NO_OP]';
+            }
+            
+            if (data.loss_val !== undefined && data.loss_val > 0) {
+                lossIndicator.textContent = `Optimizing Loss: ${data.loss_val.toFixed(4)}`;
+            }
+            
+            if(data.membrane_potentials) {
+                data.membrane_potentials.forEach((val, i) => {
+                    if(i < efeBars.length) {
+                        const normalized = Math.min(100, Math.max(5, Math.abs(val) * 100));
+                        efeBars[i].style.height = `${normalized}%`;
+                    }
+                });
+            }
+            
+            if (!data.is_autonomous && data.emitted_word) {
+                appendMsg(`>> ${data.emitted_word}`, 'user');
+            } else if (data.is_autonomous) {
+                appendMsg(`[MATRIX_MODE] Train Step -> Predicted: [${data.emitted_word || '??'}] (Loss: ${data.loss_val ? data.loss_val.toFixed(4) : '--'})`, 'sys');
+                if (logDiv.childElementCount > 60) {
+                    logDiv.removeChild(logDiv.firstChild);
+                }
+            }
+        }
+    };
+
+    ws.onclose = () => {
+        clearInterval(window.pingInterval);
+        sysStatus.textContent = "SYS.DISCONNECTED";
+        console.log("Connection lost. Reconnecting in 3 seconds...");
+        setTimeout(connectToCore, 3000);
+    };
+
+    // Override sendInput to use current WS
+    window.activeWs = ws;
+}
+
+// Initial Connection
+connectToCore();
+
+function sendInput() {
+    const text = inputField.value.trim();
+    if (!text && !activeMediaB64) return;
     
-    if (payload.type === 'status' && payload.message === 'processing') {
-        sysStatus.textContent = "COGNITION.ACTIVE";
-        statusWrapper.classList.add('active');
-        statusWrapper.querySelector('.dot').classList.add('pulse-anim');
-    }
+    if (text) appendMsg(`> ${text}`, 'user');
     
-    if (payload.type === 'brain_cycle') {
-        const data = payload.data;
-        
-        // Return UI to idle
-        sysStatus.textContent = "SYS.IDLE";
-        statusWrapper.classList.remove('active');
-        statusWrapper.querySelector('.dot').classList.remove('pulse-anim');
-        
-        // Update Panel Metrics
-        moeIdx.textContent = `EXPERT_${data.moe_expert_idx.toString().padStart(2, '0')}`;
-        
-        // Setup Visual AST
-        symbAst.innerHTML = ''; // clear
-        symbAst.appendChild(symbProg); // Keep the main label
-        symbProg.textContent = data.symbolic_prog || '[NO_OP]';
-        
-        if(data.symbolic_ast && data.symbolic_ast.nodes) {
-            data.symbolic_ast.nodes.forEach((node, idx) => {
-                const el = document.createElement('div');
-                el.className = 'ast-node';
-                el.textContent = node.label;
-                symbAst.appendChild(el);
-                if (idx < data.symbolic_ast.nodes.length - 1) {
-                    const arrow = document.createElement('div');
-                    arrow.className = 'ast-edge';
-                    arrow.textContent = '→';
-                    symbAst.appendChild(arrow);
-                }
-            });
-        }
-
-        // Update 3D Camera navigation based on Action Tensor!
-        // This is the NovaMind bridging into Lyra's generative trajectory 
-        if(camera && data.action_vector) {
-            // Morph camera projection smoothly towards Tensor intention
-            const targetZ = 3 + (data.action_vector[1] * 2);
-            const targetX = data.action_vector[0] * 3;
-            // Tween camera
-            camera.position.z += (targetZ - camera.position.z) * 0.1;
-            camera.position.x += (targetX - camera.position.x) * 0.1;
-            
-            // Perturb points scale by loss values if training
-            if(particleMat && data.loss_val) {
-               particleMat.size = 0.05 + Math.min(0.2, data.loss_val * 0.02);
-            }
-        }
-
-        memIdx.textContent = `0x${data.mem_index.toString(16).toUpperCase()}`;
-        
-        // Show Real Training Loss
-        if (data.loss_val !== undefined && data.loss_val > 0) {
-            lossIndicator.textContent = `Optimizing Loss: ${data.loss_val.toFixed(4)}`;
-        }
-        
-        // Update Neuromorphic LIF Action Meters (Membrane Potentials)
-        if(data.membrane_potentials) {
-            data.membrane_potentials.forEach((val, i) => {
-                if(i < efeBars.length) {
-                    // Neural voltage grows as it nears threshold (1.0 typical)
-                    const normalized = Math.min(100, Math.max(5, Math.abs(val) * 100));
-                    efeBars[i].style.height = `${normalized}%`;
-                }
-            });
-        }
-        
-        // Flash UI on Spikes! Biological Firing Pattern
-        if(data.spikes) {
-            let spiked = false;
-            let spkSig = "";
-            data.spikes.forEach((val, i) => {
-                if(i < spikeFlashes.length && val > 0) {
-                    // Instant Flash
-                    spikeFlashes[i].classList.add('fired');
-                    setTimeout(() => spikeFlashes[i].classList.remove('fired'), 50);
-                    spiked = true;
-                }
-                spkSig += val > 0 ? "1" : "0";
-            });
-            if(spiked) {
-                appendMsg(`⚡ [SNN_SPIKE] Pattern Fired: ${spkSig}`, 'sys');
-            }
-        }
-        
-        if (!data.is_autonomous && data.emitted_word) {
-            let msgType = payload.is_volition ? 'agi volition' : 'agi';
-            let prefix = payload.is_volition ? '⚡ [VOLITION/INITIATIVE] >> ' : '>> ';
-            
-            appendMsg(`${prefix}${data.emitted_word}`, msgType);
-            
-            if (data.emitted_modality === 'audio' && data.emitted_media_b64) {
-                const audioEl = document.createElement('audio');
-                audioEl.controls = true;
-                audioEl.autoplay = true;
-                audioEl.src = data.emitted_media_b64;
-                audioEl.style.marginTop = '8px';
-                logDiv.appendChild(audioEl);
-                logDiv.scrollTop = logDiv.scrollHeight;
-            } else if (data.emitted_modality === 'image' && data.emitted_media_b64) {
-                const imgEl = document.createElement('img');
-                imgEl.src = data.emitted_media_b64;
-                imgEl.style.width = '200px';
-                imgEl.style.borderRadius = '8px';
-                imgEl.style.marginTop = '8px';
-                logDiv.appendChild(imgEl);
-                logDiv.scrollTop = logDiv.scrollHeight;
-            }
-        } else if (data.is_autonomous) {
-            // Log passive backprop so user can see it!
-            appendMsg(`[MATRIX_MODE] Train Step -> Predicted: [${data.emitted_word}] (Loss: ${data.loss_val?.toFixed(4)})`, 'sys');
-            // Clean up old nodes to prevent RAM crash since this runs 20 times per second
-            if (logDiv.childElementCount > 100) {
-                logDiv.removeChild(logDiv.firstChild);
-            }
-        }
+    const payload = {
+        type: "sensory_input",
+        text: text,
+        media: activeMediaB64,
+        media_type: activeMediaType
+    };
+    
+    if (!window.activeWs || window.activeWs.readyState !== WebSocket.OPEN) {
+        appendMsg(`[ERROR] Neural Link Server is offline/disconnected.`, 'sys');
+        return;
     }
-};
 
-ws.onclose = () => {
-    sysStatus.textContent = "SYS.DISCONNECTED";
-    appendMsg("Connection lost to Core.", "sys");
-};
+    window.activeWs.send(JSON.stringify(payload));
+    
+    inputField.value = '';
+    activeMediaB64 = null;
+    activeMediaType = null;
+    if(fileInput) fileInput.value = '';
+}
