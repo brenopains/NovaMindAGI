@@ -148,12 +148,8 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
     emitted_modality = "text"
     emitted_media_b64 = None
     
-    # 1. Modality Decision (Free Will Selection)
-    modality_logits = continuous_action[0][:3]
-    modality_idx = modality_logits.argmax().item()
-    if modality_idx == 0: emitted_modality = "text"
-    elif modality_idx == 1: emitted_modality = "audio"
-    else: emitted_modality = "image"
+    # 1. Modality Decision (Free Will Selection Disabled per user request)
+    emitted_modality = "text"
     
     if is_autonomous:
         # Fast Training Mode (Single Token)
@@ -195,30 +191,6 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
                 loop_action = next_action.detach()
                 
             emitted_text = " ".join(gen_words)
-            
-        elif emitted_modality == "audio":
-            import wave, math, struct
-            seed_val = abs(float(action[0][4].item())) # Use neural mood for pitch
-            base_freq = 150 + (seed_val * 400)
-            sample_rate, duration = 8000, 1.0
-            
-            buf = io.BytesIO()
-            with wave.open(buf, 'wb') as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(sample_rate)
-                for i in range(int(sample_rate * duration)):
-                    t = float(i) / sample_rate
-                    # Robotic neural babble modulation
-                    value = int(32767.0 * math.sin(2.0 * math.pi * base_freq * t + math.sin(15 * math.pi * t * seed_val)))
-                    wav_file.writeframesraw(struct.pack('<h', value))
-            emitted_media_b64 = "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
-            emitted_text = "[AGI GENERATED FREQUENCY AUDIO]"
-            
-        elif emitted_modality == "image":
-            # Repurpose the Latent Geom as an arbitrary visual output of the AGI's mind
-            emitted_media_b64 = "data:image/png;base64," + b64_latent_img
-            emitted_text = "[AGI MATERIALIZED SUBCONSCIOUS IMAGE]"
             
         last_action = action.detach()
         current_state = {k: v.detach() for k, v in current_state.items()}
@@ -326,16 +298,6 @@ async def autonomous_mind_loop():
             # Pass everything. The model learns to ground words with the visual/auditory context!
             brain_state = tensor_step(input_text=context, input_image=img_tensor, input_audio=audio_cropped, is_autonomous=True, target_text=target)
             accumulated_loss += brain_state["loss_val"]
-            
-            # 1. VOLITION CHECK: Se a AGI decidiu falar sozinha baseada na química do cérebro
-            if brain_state["spikes"] and brain_state["spikes"][4] == 1:
-                vol_state = tensor_step(input_text="*", is_autonomous=False)
-                vol_payload = json.dumps({"type": "brain_cycle", "data": vol_state, "is_volition": True})
-                for conn in manager.active_connections.copy():
-                    try:
-                        await conn.send_text(vol_payload)
-                    except WebSocketDisconnect:
-                        pass
             
             payload = json.dumps({"type": "brain_cycle", "data": brain_state})
             for conn in manager.active_connections.copy():
