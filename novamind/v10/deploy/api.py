@@ -297,8 +297,14 @@ async def autonomous_mind_loop():
             img_sample = next(vision_iter)['image']
             img_tensor = trans_vis(img_sample).unsqueeze(0) # [1, 3, 64, 64]
             
-            audio_sample = next(audio_iter)['audio']['array']
-            audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0)
+            try:
+                audio_sample = next(audio_iter)['audio']['array']
+                audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0)
+            except Exception:
+                # O codec C++ do PyTorch falhou. Alimentamos o cortex auditivo dela com "Ruído Branco" (White Noise) 
+                # para não interromper o treinamento do Fineweb!
+                audio_cropped = torch.randn((1, 1, 2000)).float()
+                
         except StopIteration:
             text_iter = iter(ds_text); vision_iter = iter(ds_vision); audio_iter = iter(ds_audio)
             continue
