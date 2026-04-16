@@ -305,9 +305,13 @@ ws.onmessage = (event) => {
         
         if (!data.is_autonomous && data.emitted_word) {
             appendMsg(`>> ${data.emitted_word}`, 'agi');
-        } else if (data.loss_val && !data.spikes?.includes(1)) {
-            // Optional: log passive backprop
-            // appendMsg(`[Backprop] Target Word vs Emitted: -> [${data.emitted_word}] (Loss: ${data.loss_val.toFixed(4)})`, 'sys');
+        } else if (data.is_autonomous) {
+            // Log passive backprop so user can see it!
+            appendMsg(`[MATRIX_MODE] Train Step -> Predicted: [${data.emitted_word}] (Loss: ${data.loss_val?.toFixed(4)})`, 'sys');
+            // Clean up old nodes to prevent RAM crash since this runs 20 times per second
+            if (logDiv.childElementCount > 100) {
+                logDiv.removeChild(logDiv.firstChild);
+            }
         }
     }
 };
