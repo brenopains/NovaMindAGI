@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="NovaMind — 7-Layer AGI Architecture Prototype Dashboard">
+    <title>NovaMind — AGI Cognitive Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+</head>
+<body>
+
+<!-- ═══════ HEADER ═══════ -->
+<header class="header" id="main-header">
+    <div class="header-left">
+        <div>
+            <div class="logo">🧠 NovaMind</div>
+            <div class="logo-sub">7-Layer AGI Architecture</div>
+        </div>
+    </div>
+    <div class="header-stats">
+        <div class="stat-item">
+            <span class="pulse-dot"></span>
+            <span>Active</span>
+        </div>
+        <div class="stat-item">
+            Cycles: <span class="stat-value" id="stat-cycles">0</span>
+        </div>
+        <div class="stat-item">
+            Concepts: <span class="stat-value" id="stat-concepts">0</span>
+        </div>
+        <div class="stat-item">
+            Memory: <span class="stat-value" id="stat-memory">0</span>
+        </div>
+        <div class="stat-item">
+            Confidence: <span class="stat-value" id="stat-confidence">—</span>
+        </div>
+    </div>
+</header>
+
+<!-- ═══════ MAIN LAYOUT ═══════ -->
+<main class="main">
+
+    <!-- Pipeline (top bar) -->
+    <section class="pipeline-section panel">
+        <div class="pipeline" id="pipeline">
+            <div class="layer-node" data-layer="perception" id="layer-perception">
+                <span class="layer-icon">👁️</span>
+                <span class="layer-name">Perception</span>
+                <span class="layer-metric" id="metric-perception">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="world_model" id="layer-world_model">
+                <span class="layer-icon">🌍</span>
+                <span class="layer-name">World Model</span>
+                <span class="layer-metric" id="metric-world_model">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="memory" id="layer-memory">
+                <span class="layer-icon">🧩</span>
+                <span class="layer-name">Memory</span>
+                <span class="layer-metric" id="metric-memory">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="reasoning" id="layer-reasoning">
+                <span class="layer-icon">⚡</span>
+                <span class="layer-name">Reasoning</span>
+                <span class="layer-metric" id="metric-reasoning">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="metacognition" id="layer-metacognition">
+                <span class="layer-icon">🔮</span>
+                <span class="layer-name">Metacognition</span>
+                <span class="layer-metric" id="metric-metacognition">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="goals" id="layer-goals">
+                <span class="layer-icon">🎯</span>
+                <span class="layer-name">Goals</span>
+                <span class="layer-metric" id="metric-goals">—</span>
+            </div>
+            <span class="layer-connector">→</span>
+            <div class="layer-node" data-layer="learning" id="layer-learning">
+                <span class="layer-icon">📈</span>
+                <span class="layer-name">Learning</span>
+                <span class="layer-metric" id="metric-learning">—</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Panels Grid (left) -->
+    <div class="panels-grid">
+
+        <!-- Knowledge Graph -->
+        <div class="panel" id="panel-graph">
+            <div class="panel-header">
+                <span class="panel-title"><span class="icon">🌐</span> Knowledge Graph</span>
+                <span class="panel-badge badge-cyan" id="badge-nodes">0 nodes</span>
+            </div>
+            <svg id="graph-canvas"></svg>
+        </div>
+
+        <!-- Memory -->
+        <div class="panel" id="panel-memory">
+            <div class="panel-header">
+                <span class="panel-title"><span class="icon">🧩</span> Memory System</span>
+                <span class="panel-badge badge-green" id="badge-compression">0% compressed</span>
+            </div>
+            <div class="memory-grid">
+                <div class="memory-type">
+                    <div class="memory-type-label">Episodic</div>
+                    <div class="memory-type-value" id="mem-episodic" style="color:var(--neon-cyan)">0</div>
+                </div>
+                <div class="memory-type">
+                    <div class="memory-type-label">Semantic</div>
+                    <div class="memory-type-value" id="mem-semantic" style="color:var(--neon-purple)">0</div>
+                </div>
+                <div class="memory-type">
+                    <div class="memory-type-label">Procedural</div>
+                    <div class="memory-type-value" id="mem-procedural" style="color:var(--neon-green)">0</div>
+                </div>
+            </div>
+            <div class="compression-bar">
+                <div class="compression-fill" id="compression-fill" style="width: 0%"></div>
+            </div>
+            <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.4rem; display:flex; justify-content:space-between;">
+                <span>Auto-compaction</span>
+                <span id="compression-label">0%</span>
+            </div>
+        </div>
+
+        <!-- Reasoning Trace -->
+        <div class="panel" id="panel-reasoning">
+            <div class="panel-header">
+                <span class="panel-title"><span class="icon">⚡</span> Reasoning Trace</span>
+                <span class="panel-badge badge-purple" id="badge-paradigm">—</span>
+            </div>
+            <div class="trace-list" id="trace-list">
+                <div class="trace-line" style="color:var(--text-muted); font-style:italic;">
+                    Send a message to see the reasoning trace...
+                </div>
+            </div>
+        </div>
+
+        <!-- Metacognition + Goals -->
+        <div class="panel" id="panel-meta">
+            <div class="panel-header">
+                <span class="panel-title"><span class="icon">🔮</span> Metacognition</span>
+                <span class="panel-badge badge-amber" id="badge-state">Initializing</span>
+            </div>
+            <div class="gauge-grid" id="gauge-grid">
+                <div class="gauge">
+                    <div class="gauge-label">Confidence</div>
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 60 60">
+                            <circle class="bg" cx="30" cy="30" r="26"/>
+                            <circle class="fill" id="gauge-confidence" cx="30" cy="30" r="26"
+                                stroke="var(--neon-cyan)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
+                        </svg>
+                        <span class="gauge-value" id="gval-confidence">—</span>
+                    </div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-label">Coherence</div>
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 60 60">
+                            <circle class="bg" cx="30" cy="30" r="26"/>
+                            <circle class="fill" id="gauge-coherence" cx="30" cy="30" r="26"
+                                stroke="var(--neon-purple)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
+                        </svg>
+                        <span class="gauge-value" id="gval-coherence">—</span>
+                    </div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-label">Curiosity</div>
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 60 60">
+                            <circle class="bg" cx="30" cy="30" r="26"/>
+                            <circle class="fill" id="gauge-curiosity" cx="30" cy="30" r="26"
+                                stroke="var(--neon-amber)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
+                        </svg>
+                        <span class="gauge-value" id="gval-curiosity">—</span>
+                    </div>
+                </div>
+                <div class="gauge">
+                    <div class="gauge-label">Surprise</div>
+                    <div class="gauge-ring">
+                        <svg viewBox="0 0 60 60">
+                            <circle class="bg" cx="30" cy="30" r="26"/>
+                            <circle class="fill" id="gauge-surprise" cx="30" cy="30" r="26"
+                                stroke="var(--neon-rose)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
+                        </svg>
+                        <span class="gauge-value" id="gval-surprise">—</span>
+                    </div>
+                </div>
+            </div>
+            <div style="margin-top:0.75rem; border-top:1px solid var(--glass-border); padding-top:0.75rem;">
+                <div style="font-size:0.7rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem;">🎯 Active Goals</div>
+                <div class="goal-list" id="goal-list">
+                    <div class="goal-chip">
+                        <span class="goal-priority medium"></span>
+                        <span class="goal-text">Awaiting first input...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Panel (right side) -->
+    <div class="panel chat-panel" id="panel-chat">
+        <div class="panel-header">
+            <span class="panel-title"><span class="icon">💬</span> Cognitive Interface</span>
+            <span class="panel-badge badge-cyan" id="badge-cycle">Cycle 0</span>
+        </div>
+        <div class="chat-messages" id="chat-messages">
+            <div class="message message-system">
+                <strong>NovaMind initialized.</strong><br>
+                7-layer cognitive architecture active.<br><br>
+                Send any input — text, questions, concepts — and observe the full thought process across all layers: perception, world modeling, memory, reasoning, metacognition, goals, and learning.<br><br>
+                <em>Every thought is fully transparent. Watch the mind think.</em>
+            </div>
+        </div>
+        <div class="chat-input-area">
+            <input type="text" class="chat-input" id="chat-input"
+                   placeholder="Enter input for the mind..." autocomplete="off">
+            <button class="send-btn" id="send-btn">Think</button>
+        </div>
+    </div>
+
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

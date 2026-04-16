@@ -1,0 +1,8 @@
+__pycache__/
+*.pt
+*.pth
+*.log
+venv/
+tmp/
+.pytest_cache/
+dummy.txt
