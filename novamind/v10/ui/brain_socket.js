@@ -1,4 +1,5 @@
-const ws = new WebSocket(`ws://${location.host}/ws`);
+const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
 const logDiv = document.getElementById('chat-log');
 const inputField = document.getElementById('user-input');
@@ -187,6 +188,11 @@ function sendInput() {
         media_type: activeMediaType
     };
     
+    if (ws.readyState !== WebSocket.OPEN) {
+        appendMsg(`[ERROR] Neural Link Server is offline/disconnected.`, 'sys');
+        return;
+    }
+
     ws.send(JSON.stringify(payload));
     
     inputField.value = '';
