@@ -144,21 +144,84 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
     b64_latent_img = base64.b64encode(buf.getvalue()).decode('utf-8')
     
     loss_val = 0.0
-    emitted_word = ""
-    gen_logits = emit_head(action) # [1, 16384]
-    sampled_id = gen_logits.argmax(-1).item()
-    emitted_word = tokenizer.decode([sampled_id])
+    emitted_text = ""
+    emitted_modality = "text"
+    emitted_media_b64 = None
     
-    if is_autonomous and target_text is not None:
-        target_tokens = tokenizer.encode(target_text)
-        if not target_tokens: target_tokens = [tokenizer.unk_id]
-        target_ids = torch.tensor(target_tokens[-1:]).to(device)
-        loss = F.cross_entropy(gen_logits, target_ids)
-        loss.backward()
-        loss_val = float(loss.item())
+    # 1. Modality Decision (Free Will Selection)
+    modality_logits = continuous_action[0][:3]
+    modality_idx = modality_logits.argmax().item()
+    if modality_idx == 0: emitted_modality = "text"
+    elif modality_idx == 1: emitted_modality = "audio"
+    else: emitted_modality = "image"
+    
+    if is_autonomous:
+        # Fast Training Mode (Single Token)
+        gen_logits = emit_head(action) # [1, 16384]
+        sampled_id = gen_logits.argmax(-1).item()
+        emitted_text = tokenizer.decode([sampled_id])
+        
+        if target_text is not None:
+            target_tokens = tokenizer.encode(target_text)
+            if not target_tokens: target_tokens = [tokenizer.unk_id]
+            target_ids = torch.tensor(target_tokens[-1:]).to(device)
+            loss = F.cross_entropy(gen_logits, target_ids)
+            loss.backward()
+            loss_val = float(loss.item())
 
-    last_action = action.detach()
-    current_state = {k: v.detach() for k, v in current_state.items()}
+        last_action = action.detach()
+        current_state = {k: v.detach() for k, v in current_state.items()}
+    else:
+        # Interactive Mode (Autoregressive Generation & Media)
+        if emitted_modality == "text":
+            gen_words = []
+            loop_state = {k: v.detach() for k, v in current_state.items()}
+            loop_action = action.detach()
+            
+            for _ in range(8): # Generate 8 token sentence
+                gen_logits = emit_head(loop_action)
+                sampled_id = gen_logits.argmax(-1).item()
+                word = tokenizer.decode([sampled_id])
+                gen_words.append(word)
+                
+                # Feedback loop
+                next_input_ids = torch.tensor([[sampled_id]]).to(device)
+                next_emb = text_encoder(next_input_ids)
+                next_prior, next_posterior, loop_state = rssm.step(loop_state, loop_action, next_emb.squeeze(1))
+                
+                next_moe, _ = moe(loop_state['deter'].unsqueeze(1))
+                stoch_flat = loop_state['stoch'].view(loop_state['stoch'].size(0), -1)
+                next_action, _ = actor_critic(next_moe.squeeze(1), stoch_flat)
+                loop_action = next_action.detach()
+                
+            emitted_text = " ".join(gen_words)
+            
+        elif emitted_modality == "audio":
+            import wave, math, struct
+            seed_val = abs(float(action[0][4].item())) # Use neural mood for pitch
+            base_freq = 150 + (seed_val * 400)
+            sample_rate, duration = 8000, 1.0
+            
+            buf = io.BytesIO()
+            with wave.open(buf, 'wb') as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                for i in range(int(sample_rate * duration)):
+                    t = float(i) / sample_rate
+                    # Robotic neural babble modulation
+                    value = int(32767.0 * math.sin(2.0 * math.pi * base_freq * t + math.sin(15 * math.pi * t * seed_val)))
+                    wav_file.writeframesraw(struct.pack('<h', value))
+            emitted_media_b64 = "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode('utf-8')
+            emitted_text = "[AGI GENERATED FREQUENCY AUDIO]"
+            
+        elif emitted_modality == "image":
+            # Repurpose the Latent Geom as an arbitrary visual output of the AGI's mind
+            emitted_media_b64 = "data:image/png;base64," + b64_latent_img
+            emitted_text = "[AGI MATERIALIZED SUBCONSCIOUS IMAGE]"
+            
+        last_action = action.detach()
+        current_state = {k: v.detach() for k, v in current_state.items()}
     
     programs, _ = symbolic_head.generate_program(moe_out.detach(), max_len=3)
     program_emitted = "".join(programs[0][:-1])
@@ -177,7 +240,9 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
         "action_vector": [float(x) for x in action[0][:5].detach().cpu().numpy()], 
         "spikes": [int(x) for x in spikes[0][:5].cpu().numpy()],
         "membrane_potentials": [float(x) for x in membrane_potentials[0][:5].detach().cpu().numpy()],
-        "emitted_word": emitted_word,
+        "emitted_word": emitted_text,
+        "emitted_modality": emitted_modality,
+        "emitted_media_b64": emitted_media_b64,
         "loss_val": loss_val
     }
 
@@ -251,6 +316,16 @@ async def autonomous_mind_loop():
             # Pass everything. The model learns to ground words with the visual/auditory context!
             brain_state = tensor_step(input_text=context, input_image=img_tensor, input_audio=audio_cropped, is_autonomous=True, target_text=target)
             accumulated_loss += brain_state["loss_val"]
+            
+            # 1. VOLITION CHECK: Se a AGI decidiu falar sozinha baseada na química do cérebro
+            if brain_state["spikes"] and brain_state["spikes"][4] == 1:
+                vol_state = tensor_step(input_text="*", is_autonomous=False)
+                vol_payload = json.dumps({"type": "brain_cycle", "data": vol_state, "is_volition": True})
+                for conn in manager.active_connections.copy():
+                    try:
+                        await conn.send_text(vol_payload)
+                    except WebSocketDisconnect:
+                        pass
             
             payload = json.dumps({"type": "brain_cycle", "data": brain_state})
             for conn in manager.active_connections.copy():

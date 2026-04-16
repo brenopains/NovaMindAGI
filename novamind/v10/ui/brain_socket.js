@@ -304,7 +304,28 @@ ws.onmessage = (event) => {
         }
         
         if (!data.is_autonomous && data.emitted_word) {
-            appendMsg(`>> ${data.emitted_word}`, 'agi');
+            let msgType = payload.is_volition ? 'agi volition' : 'agi';
+            let prefix = payload.is_volition ? '⚡ [VOLITION/INITIATIVE] >> ' : '>> ';
+            
+            appendMsg(`${prefix}${data.emitted_word}`, msgType);
+            
+            if (data.emitted_modality === 'audio' && data.emitted_media_b64) {
+                const audioEl = document.createElement('audio');
+                audioEl.controls = true;
+                audioEl.autoplay = true;
+                audioEl.src = data.emitted_media_b64;
+                audioEl.style.marginTop = '8px';
+                logDiv.appendChild(audioEl);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            } else if (data.emitted_modality === 'image' && data.emitted_media_b64) {
+                const imgEl = document.createElement('img');
+                imgEl.src = data.emitted_media_b64;
+                imgEl.style.width = '200px';
+                imgEl.style.borderRadius = '8px';
+                imgEl.style.marginTop = '8px';
+                logDiv.appendChild(imgEl);
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
         } else if (data.is_autonomous) {
             // Log passive backprop so user can see it!
             appendMsg(`[MATRIX_MODE] Train Step -> Predicted: [${data.emitted_word}] (Loss: ${data.loss_val?.toFixed(4)})`, 'sys');
