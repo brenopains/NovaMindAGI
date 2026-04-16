@@ -316,18 +316,20 @@ async def autonomous_mind_loop():
         optimizer.step()
         global_step += 1
         
-        avg_loss = accumulated_loss / (len(words)-2)
+        avg_loss = accumulated_loss / max(1, len(words)-2)
         if avg_loss > 0 and avg_loss < best_loss:
             best_loss = avg_loss
-            if global_step % 20 == 0:
-                torch.save({
-                    'text_enc': text_encoder.state_dict(),
-                    'vis_enc': vision_encoder_core.state_dict(),
-                    'aud_enc': audio_encoder_core.state_dict(),
-                    'jepa': jepa_trunk.state_dict(),
-                    'rssm': rssm.state_dict(),
-                    'actor': actor_critic.state_dict()
-                }, "best_a40_multimodal.pt")
+            
+        # Salva o arquivo FISICAMENTE no disco no primeiro loop e a cada 5 loops!
+        if global_step == 1 or global_step % 5 == 0:
+            torch.save({
+                'text_enc': text_encoder.state_dict(),
+                'vis_enc': vision_encoder_core.state_dict(),
+                'aud_enc': audio_encoder_core.state_dict(),
+                'jepa': jepa_trunk.state_dict(),
+                'rssm': rssm.state_dict(),
+                'actor': actor_critic.state_dict()
+            }, "best_a40_multimodal.pt")
         
         await asyncio.sleep(0.1)
 
