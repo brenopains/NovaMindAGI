@@ -88,7 +88,7 @@ all_params = (
     list(emit_head.parameters()) + list(vision_encoder_core.parameters()) +
     list(vision_projection.parameters()) + list(audio_encoder_core.parameters())
 )
-optimizer = torch.optim.AdamW(all_params, lr=1e-3, weight_decay=0.01)
+optimizer = torch.optim.AdamW(all_params, lr=3e-4, weight_decay=0.01)
 
 batch_size = 1
 current_state = rssm.initial_state(batch_size, device=device)
@@ -189,7 +189,7 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
     
     if is_autonomous:
         # Fast Training Mode (Single Token)
-        gen_logits = emit_head(dense_latent) # [1, 16384] - Using full 2048D Semantic Cortex
+        gen_logits = emit_head(obs_embed + moe_out) # Current observation + expert-routed temporal context
         sampled_id = gen_logits.argmax(-1).item()
         emitted_text = tokenizer.decode([sampled_id])
         
@@ -211,7 +211,8 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
             loop_action = action.detach()
             
             for _ in range(8): # Generate 8 token sentence
-                gen_logits = emit_head(loop_state['deter'])
+                loop_moe, _ = moe(loop_state['deter'].unsqueeze(1))
+                gen_logits = emit_head(obs_embed + loop_moe.squeeze(1))
                 sampled_id = gen_logits.argmax(-1).item()
                 word = tokenizer.decode([sampled_id])
                 gen_words.append(word)
@@ -374,8 +375,8 @@ async def autonomous_mind_loop():
             stoch_flat = train_state['stoch'].view(1, -1)
             train_action, value = actor_critic(moe_out, stoch_flat)
             
-            # Predict next word from FULL 2048D semantic cortex
-            gen_logits = emit_head(dense_latent)
+            # Predict next word using CURRENT observation + temporal context
+            gen_logits = emit_head(obs_embed + moe_out)
             predicted_word = tokenizer.decode([gen_logits.argmax(-1).item()])
             
             # Cross-entropy loss CONNECTED through ENTIRE computation graph!
