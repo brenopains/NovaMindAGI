@@ -72,7 +72,14 @@ symbolic_head = SymbolicHead(embed_dim=D_MODEL).to(device)
 memory = FaissMemory(embed_dim=D_MODEL)
 snn_adapter = LIFNeuron(action_dim=10, threshold=0.75, leak_decay=0.85).to(device)
 
-emit_head = torch.nn.Linear(D_MODEL, 16384).to(device)
+emit_head = torch.nn.Sequential(
+    torch.nn.Linear(D_MODEL, D_MODEL),
+    torch.nn.LayerNorm(D_MODEL),
+    torch.nn.GELU(),
+    torch.nn.Linear(D_MODEL, D_MODEL // 2),
+    torch.nn.GELU(),
+    torch.nn.Linear(D_MODEL // 2, 16384)
+).to(device)
 
 all_params = (
     list(text_encoder.parameters()) + list(jepa_trunk.parameters()) +
@@ -86,6 +93,35 @@ optimizer = torch.optim.AdamW(all_params, lr=1e-3, weight_decay=0.01)
 batch_size = 1
 current_state = rssm.initial_state(batch_size, device=device)
 last_action = torch.zeros(1, 10).to(device)
+
+# --- CHECKPOINT LOADING (Resume Training Across Restarts) ---
+checkpoint_path = "best_a40_multimodal.pt"
+if os.path.exists(checkpoint_path):
+    print(f"[MIND] Loading checkpoint from {checkpoint_path}...")
+    try:
+        ckpt = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        text_encoder.load_state_dict(ckpt.get('text_enc', text_encoder.state_dict()))
+        vision_encoder_core.load_state_dict(ckpt.get('vis_enc', vision_encoder_core.state_dict()))
+        audio_encoder_core.load_state_dict(ckpt.get('aud_enc', audio_encoder_core.state_dict()))
+        jepa_trunk.load_state_dict(ckpt.get('jepa', jepa_trunk.state_dict()))
+        rssm.load_state_dict(ckpt.get('rssm', rssm.state_dict()))
+        actor_critic.load_state_dict(ckpt.get('actor', actor_critic.state_dict()))
+        if 'emit_head' in ckpt:
+            try: emit_head.load_state_dict(ckpt['emit_head'])
+            except: print("[MIND] emit_head architecture changed, skipping.")
+        if 'moe' in ckpt:
+            moe.load_state_dict(ckpt['moe'])
+        if 'symbolic' in ckpt:
+            symbolic_head.load_state_dict(ckpt['symbolic'])
+        if 'vis_proj' in ckpt:
+            vision_projection.load_state_dict(ckpt['vis_proj'])
+        _step = ckpt.get('global_step', 0)
+        _loss = ckpt.get('best_loss', 999.0)
+        print(f"[MIND] Checkpoint loaded! Step: {_step}, Best Loss: {_loss:.4f}")
+    except Exception as e:
+        print(f"[MIND] Checkpoint load failed (architecture change?): {e}. Starting fresh.")
+else:
+    print("[MIND] No checkpoint found. Starting fresh training.")
 
 def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: torch.Tensor = None, is_autonomous: bool = False, target_text: str = None) -> dict:
     global current_state, last_action
@@ -234,6 +270,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def autonomous_mind_loop():
+    global current_state, last_action
     manager.autonomous_loop_running = True
     print("[MIND] Initializing MASSIVE Multimodal HuggingFace Streams (FineWeb / MNIST / LibriSpeech)...")
     
@@ -255,27 +292,32 @@ async def autonomous_mind_loop():
     global_step = 0
     best_loss = 999.0
     
+    # Resume training counters from checkpoint
+    if os.path.exists("best_a40_multimodal.pt"):
+        try:
+            ckpt = torch.load("best_a40_multimodal.pt", map_location=device, weights_only=False)
+            global_step = ckpt.get('global_step', 0)
+            best_loss = ckpt.get('best_loss', 999.0)
+            print(f"[TRAIN] Resuming from step {global_step}, best loss {best_loss:.4f}")
+        except:
+            pass
+    
     while True:
-        await asyncio.sleep(0.01) # Yield to event loop slightly
-        if not manager.active_connections:
-            await asyncio.sleep(1.0)
-            continue
+        await asyncio.sleep(0.01)
+        # TRAIN CONTINUOUSLY - NO WebSocket barrier! AGI trains even when nobody watches.
             
         try:
-            # 1. Fetch Multimodal Elements
             text_sample = next(text_iter)['text'].strip()
             if not text_sample: continue
                 
             img_sample = next(vision_iter)['image']
-            img_tensor = trans_vis(img_sample).unsqueeze(0) # [1, 3, 64, 64]
+            img_tensor = trans_vis(img_sample).unsqueeze(0).to(device)
             
             try:
                 audio_sample = next(audio_iter)['audio']['array']
-                audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0)
+                audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0).to(device)
             except Exception:
-                # O codec C++ do PyTorch falhou. Alimentamos o cortex auditivo dela com "Ruído Branco" (White Noise) 
-                # para não interromper o treinamento do Fineweb!
-                audio_cropped = torch.randn((1, 1, 2000)).float()
+                audio_cropped = torch.randn((1, 1, 2000)).float().to(device)
                 
         except StopIteration:
             text_iter = iter(ds_text); vision_iter = iter(ds_vision); audio_iter = iter(ds_audio)
@@ -286,57 +328,104 @@ async def autonomous_mind_loop():
             continue
             
         words = text_sample.split()
-        if len(words) < 5: continue
+        if len(words) < 10: continue
         
         optimizer.zero_grad()
-        accumulated_loss = 0.0
-        total_loss_tensor = torch.tensor(0.0, device=device, requires_grad=False)
-        num_steps = 0
         
-        # Usa janela de contexto de 8 palavras para semântica mais rica
+        # Fresh recurrent state per sentence (clean computation graph)
+        train_state = rssm.initial_state(1, device=device)
+        train_action = torch.zeros(1, 10, device=device)
+        
+        total_loss = torch.tensor(0.0, device=device)
+        num_preds = 0
+        last_brain_data = None
         ctx_window = 8
+        max_steps = 16  # Cap to prevent VRAM overflow on A40
+        step_count = 0
         
-        for i in range(0, len(words) - ctx_window - 1, 2):  # stride 2 for speed
+        # Precompute vision/audio embeddings (same for all steps in this sentence)
+        q_idx, _ = vision_encoder_core(img_tensor)
+        vis_emb = vision_projection(q_idx)
+        aud_emb = audio_encoder_core(audio_cropped)
+        
+        for i in range(0, len(words) - ctx_window - 1, 2):
+            if step_count >= max_steps:
+                break
+                
             context = " ".join(words[i:i+ctx_window])
             target = words[i+ctx_window]
             
-            brain_state = tensor_step(input_text=context, input_image=img_tensor, input_audio=audio_cropped, is_autonomous=True, target_text=target)
-            accumulated_loss += brain_state["loss_val"]
+            # === END-TO-END FORWARD PASS WITH FULL GRADIENT FLOW ===
+            # Every component receives gradients: TextEncoder -> JEPA -> RSSM -> MoE -> emit_head
+            tokens = tokenizer.encode(context)
+            if not tokens: tokens = [tokenizer.unk_id]
+            input_ids = torch.tensor([tokens], device=device)
+            embeddings = text_encoder(input_ids)
             
-            # Recolhe o loss tensor para backward único
-            target_tokens = tokenizer.encode(target)
-            if not target_tokens: target_tokens = [tokenizer.unk_id]
-            target_ids = torch.tensor(target_tokens[-1:]).to(device)
-            pred_logits = emit_head(current_state['deter'].detach().requires_grad_(True))
-            step_loss = F.cross_entropy(pred_logits, target_ids)
-            total_loss_tensor = total_loss_tensor + step_loss
-            num_steps += 1
+            fused = torch.cat([embeddings, vis_emb, aud_emb], dim=1)
+            jepa_out = jepa_trunk(fused)
+            obs_embed = jepa_out.mean(dim=1)
             
-            if i % 10 == 0:
-                payload = json.dumps({"type": "brain_cycle", "data": brain_state})
+            prior, posterior, train_state = rssm.step(train_state, train_action, obs_embed)
+            dense_latent = train_state['deter']
+            
+            moe_out, _ = moe(dense_latent.unsqueeze(1))
+            moe_out = moe_out.squeeze(1)
+            stoch_flat = train_state['stoch'].view(1, -1)
+            train_action, value = actor_critic(moe_out, stoch_flat)
+            
+            # Predict next word from FULL 2048D semantic cortex
+            gen_logits = emit_head(dense_latent)
+            predicted_word = tokenizer.decode([gen_logits.argmax(-1).item()])
+            
+            # Cross-entropy loss CONNECTED through ENTIRE computation graph!
+            t_tokens = tokenizer.encode(target)
+            if not t_tokens: t_tokens = [tokenizer.unk_id]
+            t_ids = torch.tensor(t_tokens[-1:], device=device)
+            step_loss = F.cross_entropy(gen_logits, t_ids)
+            total_loss = total_loss + step_loss
+            num_preds += 1
+            step_count += 1
+            
+            # Build UI metrics (detached, no graph impact)
+            with torch.no_grad():
+                spk, memb = snn_adapter(train_action.abs())
+                last_brain_data = {
+                    "is_autonomous": True, "input_tokens": tokens,
+                    "rssm_prior_mean": float(prior['logits'].mean()),
+                    "moe_expert_idx": 0, "symbolic_prog": "",
+                    "symbolic_ast": {"nodes": [], "edges": []},
+                    "minds_eye_b64": "", "mem_index": global_step,
+                    "action_vector": [0.0]*5,
+                    "spikes": [int(x) for x in spk[0][:5].cpu().numpy()],
+                    "membrane_potentials": [float(x) for x in memb[0][:5].cpu().numpy()],
+                    "emitted_word": predicted_word, "emitted_modality": "text",
+                    "emitted_media_b64": None, "loss_val": float(step_loss.item())
+                }
+            
+            if step_count % 4 == 0 and manager.active_connections:
+                payload = json.dumps({"type": "brain_cycle", "data": last_brain_data})
                 for conn in manager.active_connections.copy():
-                    try:
-                        await conn.send_text(payload)
-                    except WebSocketDisconnect:
-                        manager.disconnect(conn)
-                    except Exception as e:
-                        print(f"WS Send Error: {e}")
+                    try: await conn.send_text(payload)
+                    except: pass
             
             await asyncio.sleep(0.005)
         
-        if num_steps > 0:
-            avg_loss_tensor = total_loss_tensor / num_steps
-            avg_loss_tensor.backward()
+        # === SINGLE BACKWARD THROUGH ENTIRE SENTENCE ===
+        if num_preds > 0:
+            (total_loss / num_preds).backward()
             torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
             optimizer.step()
         
         global_step += 1
+        avg_loss_val = float(total_loss.item()) / max(1, num_preds) if num_preds > 0 else 999.0
+        if avg_loss_val > 0 and avg_loss_val < best_loss:
+            best_loss = avg_loss_val
         
-        avg_loss = accumulated_loss / max(1, num_steps)
-        if avg_loss > 0 and avg_loss < best_loss:
-            best_loss = avg_loss
+        if global_step % 10 == 0:
+            print(f"[TRAIN] Step {global_step} | Loss: {avg_loss_val:.4f} | Best: {best_loss:.4f}")
             
-        # Salva o arquivo FISICAMENTE no disco no primeiro loop e a cada 5 loops!
+        # Save COMPLETE checkpoint (all components + optimizer for resume)
         if global_step == 1 or global_step % 5 == 0:
             torch.save({
                 'text_enc': text_encoder.state_dict(),
@@ -344,10 +433,28 @@ async def autonomous_mind_loop():
                 'aud_enc': audio_encoder_core.state_dict(),
                 'jepa': jepa_trunk.state_dict(),
                 'rssm': rssm.state_dict(),
-                'actor': actor_critic.state_dict()
+                'moe': moe.state_dict(),
+                'actor': actor_critic.state_dict(),
+                'emit_head': emit_head.state_dict(),
+                'symbolic': symbolic_head.state_dict(),
+                'vis_proj': vision_projection.state_dict(),
+                'optimizer': optimizer.state_dict(),
+                'global_step': global_step,
+                'best_loss': best_loss
             }, "best_a40_multimodal.pt")
         
-        await asyncio.sleep(0.1)
+        # Update global state for interactive mode
+        current_state = {k: v.detach() for k, v in train_state.items()}
+        last_action = train_action.detach()
+        
+        # Broadcast final state to viewers
+        if last_brain_data and manager.active_connections:
+            payload = json.dumps({"type": "brain_cycle", "data": last_brain_data})
+            for conn in manager.active_connections.copy():
+                try: await conn.send_text(payload)
+                except: pass
+        
+        await asyncio.sleep(0.05)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
