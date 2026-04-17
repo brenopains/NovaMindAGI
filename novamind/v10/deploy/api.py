@@ -81,7 +81,7 @@ all_params = (
     list(emit_head.parameters()) + list(vision_encoder_core.parameters()) +
     list(vision_projection.parameters()) + list(audio_encoder_core.parameters())
 )
-optimizer = torch.optim.AdamW(all_params, lr=3e-4)
+optimizer = torch.optim.AdamW(all_params, lr=1e-3, weight_decay=0.01)
 
 batch_size = 1
 current_state = rssm.initial_state(batch_size, device=device)
@@ -162,8 +162,8 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
             if not target_tokens: target_tokens = [tokenizer.unk_id]
             target_ids = torch.tensor(target_tokens[-1:]).to(device)
             loss = F.cross_entropy(gen_logits, target_ids)
-            loss.backward()
             loss_val = float(loss.item())
+            # NÃO faz backward aqui! Acumula e faz 1 backward gigante no fim da frase!
 
         last_action = action.detach()
         current_state = {k: v.detach() for k, v in current_state.items()}
@@ -286,21 +286,33 @@ async def autonomous_mind_loop():
             continue
             
         words = text_sample.split()
-        if len(words) < 3: continue
+        if len(words) < 5: continue
         
         optimizer.zero_grad()
         accumulated_loss = 0.0
+        total_loss_tensor = torch.tensor(0.0, device=device, requires_grad=False)
+        num_steps = 0
         
-        for i in range(len(words)-2):
-            context = " ".join(words[i:i+2])
-            target = words[i+2]
+        # Usa janela de contexto de 8 palavras para semântica mais rica
+        ctx_window = 8
+        
+        for i in range(0, len(words) - ctx_window - 1, 2):  # stride 2 for speed
+            context = " ".join(words[i:i+ctx_window])
+            target = words[i+ctx_window]
             
-            # Pass everything. The model learns to ground words with the visual/auditory context!
             brain_state = tensor_step(input_text=context, input_image=img_tensor, input_audio=audio_cropped, is_autonomous=True, target_text=target)
             accumulated_loss += brain_state["loss_val"]
             
-            # Throttle WebSocket Broadcasts to prevent Pinggy DDoS drops (Send 1 in every 5 steps)
-            if i % 5 == 0:
+            # Recolhe o loss tensor para backward único
+            target_tokens = tokenizer.encode(target)
+            if not target_tokens: target_tokens = [tokenizer.unk_id]
+            target_ids = torch.tensor(target_tokens[-1:]).to(device)
+            pred_logits = emit_head(current_state['deter'].detach().requires_grad_(True))
+            step_loss = F.cross_entropy(pred_logits, target_ids)
+            total_loss_tensor = total_loss_tensor + step_loss
+            num_steps += 1
+            
+            if i % 10 == 0:
                 payload = json.dumps({"type": "brain_cycle", "data": brain_state})
                 for conn in manager.active_connections.copy():
                     try:
@@ -310,13 +322,17 @@ async def autonomous_mind_loop():
                     except Exception as e:
                         print(f"WS Send Error: {e}")
             
-            await asyncio.sleep(0.01) # Yield minimally, max GPU speed!
-            
-        torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
-        optimizer.step()
+            await asyncio.sleep(0.005)
+        
+        if num_steps > 0:
+            avg_loss_tensor = total_loss_tensor / num_steps
+            avg_loss_tensor.backward()
+            torch.nn.utils.clip_grad_norm_(all_params, max_norm=1.0)
+            optimizer.step()
+        
         global_step += 1
         
-        avg_loss = accumulated_loss / max(1, len(words)-2)
+        avg_loss = accumulated_loss / max(1, num_steps)
         if avg_loss > 0 and avg_loss < best_loss:
             best_loss = avg_loss
             
