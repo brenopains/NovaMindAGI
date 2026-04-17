@@ -72,7 +72,7 @@ symbolic_head = SymbolicHead(embed_dim=D_MODEL).to(device)
 memory = FaissMemory(embed_dim=D_MODEL)
 snn_adapter = LIFNeuron(action_dim=10, threshold=0.75, leak_decay=0.85).to(device)
 
-emit_head = torch.nn.Linear(10, 16384).to(device)
+emit_head = torch.nn.Linear(D_MODEL, 16384).to(device)
 
 all_params = (
     list(text_encoder.parameters()) + list(jepa_trunk.parameters()) +
@@ -153,7 +153,7 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
     
     if is_autonomous:
         # Fast Training Mode (Single Token)
-        gen_logits = emit_head(action) # [1, 16384]
+        gen_logits = emit_head(dense_latent) # [1, 16384] - Using full 2048D Semantic Cortex
         sampled_id = gen_logits.argmax(-1).item()
         emitted_text = tokenizer.decode([sampled_id])
         
@@ -175,7 +175,7 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
             loop_action = action.detach()
             
             for _ in range(8): # Generate 8 token sentence
-                gen_logits = emit_head(loop_action)
+                gen_logits = emit_head(loop_state['deter'])
                 sampled_id = gen_logits.argmax(-1).item()
                 word = tokenizer.decode([sampled_id])
                 gen_words.append(word)
