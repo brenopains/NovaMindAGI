@@ -1,234 +1,232 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-br">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="NovaMind — 7-Layer AGI Architecture Prototype Dashboard">
-    <title>NovaMind — AGI Cognitive Dashboard</title>
-    <link rel="stylesheet" href="style.css">
-    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <title>NovaMind AGI - Localhost</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --container-bg: rgba(255, 255, 255, 0.03);
+            --text-color: #e2e8f0;
+            --accent: #3b82f6;
+            --accent-hover: #2563eb;
+            --blur: blur(12px);
+        }
+        body {
+            margin: 0;
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-color);
+            background-image: radial-gradient(circle at 15% 50%, rgba(59, 130, 246, 0.15), transparent 25%),
+                              radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 650px;
+            height: 85vh;
+            background: var(--container-bg);
+            backdrop-filter: var(--blur);
+            -webkit-backdrop-filter: var(--blur);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 20px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+        .header {
+            padding: 20px;
+            text-align: center;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            font-weight: 600;
+            letter-spacing: 1px;
+            color: var(--accent);
+            text-transform: uppercase;
+        }
+        .messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        /* SCROLLBAR CUSTOMIZADA */
+        .messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        .messages::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .messages::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 3px;
+        }
+        .messages::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+        
+        .msg {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 0.95rem;
+            line-height: 1.5;
+            animation: fadeIn 0.3s ease;
+            word-wrap: break-word;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .msg.user {
+            background: rgba(59, 130, 246, 0.2);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            align-self: flex-end;
+            border-bottom-right-radius: 0;
+        }
+        .msg.bot {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            align-self: flex-start;
+            border-bottom-left-radius: 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .bot .thought {
+            font-size: 0.75rem;
+            color: #94a3b8;
+            margin-bottom: 8px;
+            font-style: italic;
+            border-bottom: 1px solid rgba(255,255,255,0.05);
+            padding-bottom: 5px;
+        }
+        .bot .emit {
+            color: #e2e8f0;
+        }
+        .input-area {
+            padding: 20px;
+            border-top: 1px solid rgba(255,255,255,0.05);
+            display: flex;
+            gap: 10px;
+        }
+        input {
+            flex: 1;
+            background: rgba(0,0,0,0.2);
+            border: 1px solid rgba(255,255,255,0.1);
+            padding: 12px 15px;
+            border-radius: 10px;
+            color: white;
+            font-family: inherit;
+            outline: none;
+            transition: border 0.3s;
+        }
+        input:focus {
+            border-color: var(--accent);
+        }
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0 20px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: background 0.3s;
+        }
+        button:hover {
+            background: var(--accent-hover);
+        }
+        .loading {
+            font-size: 0.8rem;
+            color: #94a3b8;
+            align-self: flex-start;
+            margin-left: 20px;
+            display: none;
+            margin-bottom: 10px;
+        }
+    </style>
 </head>
 <body>
 
-<!-- ═══════ HEADER ═══════ -->
-<header class="header" id="main-header">
-    <div class="header-left">
-        <div>
-            <div class="logo">🧠 NovaMind</div>
-            <div class="logo-sub">7-Layer AGI Architecture</div>
-        </div>
+<div class="chat-container">
+    <div class="header">🟢 NovaMind AGI (GPU Local)</div>
+    <div class="messages" id="messages">
+        <div class="msg bot"><span class="emit">GPU limit configurado. Todas as 7 camadas cognitivas integradas e rodando na API oficial via localhost. Pode me enviar uma mensagem.</span></div>
     </div>
-    <div class="header-stats">
-        <div class="stat-item">
-            <span class="pulse-dot"></span>
-            <span>Active</span>
-        </div>
-        <div class="stat-item">
-            Cycles: <span class="stat-value" id="stat-cycles">0</span>
-        </div>
-        <div class="stat-item">
-            Concepts: <span class="stat-value" id="stat-concepts">0</span>
-        </div>
-        <div class="stat-item">
-            Memory: <span class="stat-value" id="stat-memory">0</span>
-        </div>
-        <div class="stat-item">
-            Confidence: <span class="stat-value" id="stat-confidence">—</span>
-        </div>
+    <div class="loading" id="loading">✨ NovaMind processando reflexões nas 7 camadas...</div>
+    <div class="input-area">
+        <input type="text" id="userInput" placeholder="Envie algo para o AGI..." onkeypress="if(event.key === 'Enter') sendMessage()">
+        <button onclick="sendMessage()" id="sendBtn">Enviar</button>
     </div>
-</header>
+</div>
 
-<!-- ═══════ MAIN LAYOUT ═══════ -->
-<main class="main">
-
-    <!-- Pipeline (top bar) -->
-    <section class="pipeline-section panel">
-        <div class="pipeline" id="pipeline">
-            <div class="layer-node" data-layer="perception" id="layer-perception">
-                <span class="layer-icon">👁️</span>
-                <span class="layer-name">Perception</span>
-                <span class="layer-metric" id="metric-perception">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="world_model" id="layer-world_model">
-                <span class="layer-icon">🌍</span>
-                <span class="layer-name">World Model</span>
-                <span class="layer-metric" id="metric-world_model">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="memory" id="layer-memory">
-                <span class="layer-icon">🧩</span>
-                <span class="layer-name">Memory</span>
-                <span class="layer-metric" id="metric-memory">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="reasoning" id="layer-reasoning">
-                <span class="layer-icon">⚡</span>
-                <span class="layer-name">Reasoning</span>
-                <span class="layer-metric" id="metric-reasoning">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="metacognition" id="layer-metacognition">
-                <span class="layer-icon">🔮</span>
-                <span class="layer-name">Metacognition</span>
-                <span class="layer-metric" id="metric-metacognition">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="goals" id="layer-goals">
-                <span class="layer-icon">🎯</span>
-                <span class="layer-name">Goals</span>
-                <span class="layer-metric" id="metric-goals">—</span>
-            </div>
-            <span class="layer-connector">→</span>
-            <div class="layer-node" data-layer="learning" id="layer-learning">
-                <span class="layer-icon">📈</span>
-                <span class="layer-name">Learning</span>
-                <span class="layer-metric" id="metric-learning">—</span>
-            </div>
-        </div>
-    </section>
-
-    <!-- Panels Grid (left) -->
-    <div class="panels-grid">
-
-        <!-- Knowledge Graph -->
-        <div class="panel" id="panel-graph">
-            <div class="panel-header">
-                <span class="panel-title"><span class="icon">🌐</span> Knowledge Graph</span>
-                <span class="panel-badge badge-cyan" id="badge-nodes">0 nodes</span>
-            </div>
-            <svg id="graph-canvas"></svg>
-        </div>
-
-        <!-- Memory -->
-        <div class="panel" id="panel-memory">
-            <div class="panel-header">
-                <span class="panel-title"><span class="icon">🧩</span> Memory System</span>
-                <span class="panel-badge badge-green" id="badge-compression">0% compressed</span>
-            </div>
-            <div class="memory-grid">
-                <div class="memory-type">
-                    <div class="memory-type-label">Episodic</div>
-                    <div class="memory-type-value" id="mem-episodic" style="color:var(--neon-cyan)">0</div>
-                </div>
-                <div class="memory-type">
-                    <div class="memory-type-label">Semantic</div>
-                    <div class="memory-type-value" id="mem-semantic" style="color:var(--neon-purple)">0</div>
-                </div>
-                <div class="memory-type">
-                    <div class="memory-type-label">Procedural</div>
-                    <div class="memory-type-value" id="mem-procedural" style="color:var(--neon-green)">0</div>
-                </div>
-            </div>
-            <div class="compression-bar">
-                <div class="compression-fill" id="compression-fill" style="width: 0%"></div>
-            </div>
-            <div style="font-size:0.65rem; color:var(--text-muted); margin-top:0.4rem; display:flex; justify-content:space-between;">
-                <span>Auto-compaction</span>
-                <span id="compression-label">0%</span>
-            </div>
-        </div>
-
-        <!-- Reasoning Trace -->
-        <div class="panel" id="panel-reasoning">
-            <div class="panel-header">
-                <span class="panel-title"><span class="icon">⚡</span> Reasoning Trace</span>
-                <span class="panel-badge badge-purple" id="badge-paradigm">—</span>
-            </div>
-            <div class="trace-list" id="trace-list">
-                <div class="trace-line" style="color:var(--text-muted); font-style:italic;">
-                    Send a message to see the reasoning trace...
-                </div>
-            </div>
-        </div>
-
-        <!-- Metacognition + Goals -->
-        <div class="panel" id="panel-meta">
-            <div class="panel-header">
-                <span class="panel-title"><span class="icon">🔮</span> Metacognition</span>
-                <span class="panel-badge badge-amber" id="badge-state">Initializing</span>
-            </div>
-            <div class="gauge-grid" id="gauge-grid">
-                <div class="gauge">
-                    <div class="gauge-label">Confidence</div>
-                    <div class="gauge-ring">
-                        <svg viewBox="0 0 60 60">
-                            <circle class="bg" cx="30" cy="30" r="26"/>
-                            <circle class="fill" id="gauge-confidence" cx="30" cy="30" r="26"
-                                stroke="var(--neon-cyan)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
-                        </svg>
-                        <span class="gauge-value" id="gval-confidence">—</span>
+<script>
+    const msgs = document.getElementById('messages');
+    const loading = document.getElementById('loading');
+    const input = document.getElementById('userInput');
+    const btn = document.getElementById('sendBtn');
+    
+    async function sendMessage() {
+        const text = input.value.trim();
+        if(!text) return;
+        
+        msgs.innerHTML += `<div class="msg user">${text}</div>`;
+        input.value = '';
+        msgs.scrollTop = msgs.scrollHeight;
+        
+        loading.style.display = 'block';
+        input.disabled = true;
+        btn.disabled = true;
+        
+        try {
+            // Chama a rota da API oficial do arquivo server.py do NovaMind
+            const res = await fetch('/api/think', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({input: text})
+            });
+            const data = await res.json();
+            
+            loading.style.display = 'none';
+            input.disabled = false;
+            btn.disabled = false;
+            input.focus();
+            
+            if (data.error) {
+                msgs.innerHTML += `<div class="msg bot" style="color:#ef4444;">Erro da API: ${data.error}</div>`;
+            } else {
+                // Formata o texto final para HTML (convertendo quebras de linha Markdown e Asteriscos)
+                let finalText = data.response.text || "Sem resposta...";
+                finalText = finalText.replace(/\\n/g, '<br>');
+                finalText = finalText.replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>');
+                finalText = finalText.replace(/\\*(.*?)\\*/g, '<em>$1</em>');
+                
+                // Formata o Thought com um resumo do que aconteceu nas camadas
+                const confidence = data.response.confidence ? Math.round(data.response.confidence * 100) + '%' : "N/A";
+                let thoughtProcess = `[Ciclo cognitivo #${data.cycle} | Confiança: ${confidence}]<br>
+                                      ➔ Aprendizado contínuo & Metacognição aplicados na memória.`;
+                                      
+                msgs.innerHTML += `
+                    <div class="msg bot">
+                        <span class="thought">${thoughtProcess}</span>
+                        <span class="emit">${finalText}</span>
                     </div>
-                </div>
-                <div class="gauge">
-                    <div class="gauge-label">Coherence</div>
-                    <div class="gauge-ring">
-                        <svg viewBox="0 0 60 60">
-                            <circle class="bg" cx="30" cy="30" r="26"/>
-                            <circle class="fill" id="gauge-coherence" cx="30" cy="30" r="26"
-                                stroke="var(--neon-purple)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
-                        </svg>
-                        <span class="gauge-value" id="gval-coherence">—</span>
-                    </div>
-                </div>
-                <div class="gauge">
-                    <div class="gauge-label">Curiosity</div>
-                    <div class="gauge-ring">
-                        <svg viewBox="0 0 60 60">
-                            <circle class="bg" cx="30" cy="30" r="26"/>
-                            <circle class="fill" id="gauge-curiosity" cx="30" cy="30" r="26"
-                                stroke="var(--neon-amber)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
-                        </svg>
-                        <span class="gauge-value" id="gval-curiosity">—</span>
-                    </div>
-                </div>
-                <div class="gauge">
-                    <div class="gauge-label">Surprise</div>
-                    <div class="gauge-ring">
-                        <svg viewBox="0 0 60 60">
-                            <circle class="bg" cx="30" cy="30" r="26"/>
-                            <circle class="fill" id="gauge-surprise" cx="30" cy="30" r="26"
-                                stroke="var(--neon-rose)" stroke-dasharray="163.36" stroke-dashoffset="163.36"/>
-                        </svg>
-                        <span class="gauge-value" id="gval-surprise">—</span>
-                    </div>
-                </div>
-            </div>
-            <div style="margin-top:0.75rem; border-top:1px solid var(--glass-border); padding-top:0.75rem;">
-                <div style="font-size:0.7rem; font-weight:600; color:var(--text-secondary); margin-bottom:0.5rem;">🎯 Active Goals</div>
-                <div class="goal-list" id="goal-list">
-                    <div class="goal-chip">
-                        <span class="goal-priority medium"></span>
-                        <span class="goal-text">Awaiting first input...</span>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+                `;
+            }
+            msgs.scrollTop = msgs.scrollHeight;
+        } catch(e) {
+            loading.style.display = 'none';
+            input.disabled = false;
+            btn.disabled = false;
+            msgs.innerHTML += `<div class="msg bot" style="color:#ef4444;">Erro de conexão com o AGI NovaMind. Verifique o console.</div>`;
+        }
+    }
+</script>
 
-    <!-- Chat Panel (right side) -->
-    <div class="panel chat-panel" id="panel-chat">
-        <div class="panel-header">
-            <span class="panel-title"><span class="icon">💬</span> Cognitive Interface</span>
-            <span class="panel-badge badge-cyan" id="badge-cycle">Cycle 0</span>
-        </div>
-        <div class="chat-messages" id="chat-messages">
-            <div class="message message-system">
-                <strong>NovaMind initialized.</strong><br>
-                7-layer cognitive architecture active.<br><br>
-                Send any input — text, questions, concepts — and observe the full thought process across all layers: perception, world modeling, memory, reasoning, metacognition, goals, and learning.<br><br>
-                <em>Every thought is fully transparent. Watch the mind think.</em>
-            </div>
-        </div>
-        <div class="chat-input-area">
-            <input type="text" class="chat-input" id="chat-input"
-                   placeholder="Enter input for the mind..." autocomplete="off">
-            <button class="send-btn" id="send-btn">Think</button>
-        </div>
-    </div>
-
-</main>
-
-<script src="app.js"></script>
 </body>
 </html>

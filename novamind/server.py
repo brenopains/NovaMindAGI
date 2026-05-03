@@ -7,6 +7,12 @@ import json
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
+import torch
+if not torch.cuda.is_available():
+    raise SystemError("GPU não encontrada, processamento limitado estritamente para a primeira GPU.")
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+print(f"[INIT] Processamento estritamente na GPU: {torch.cuda.get_device_name(0)}")
+
 from core.mind import NovaMind
 
 # Initialize the Mind

@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from datasets import load_dataset
 
-base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
@@ -47,12 +47,15 @@ async def read_index():
     return FileResponse(os.path.join(ui_dir, "index.html"))
 
 print("[Backend] Booting NovaMind AGI Multimodal Cortex (A40 Massive Mode)...")
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
+if not torch.cuda.is_available():
+    raise SystemError("GPU não encontrada, o processamento está estritamente limitado para a GPU ativa.")
+os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+device = 'cuda'
 
-# Massive run constraints
-D_MODEL = 2048
-STOCH_DIM = 256
-STOCH_CLASSES = 256
+# Laptop / RTX 3050 friendly constraints (Scaled down to prevent system freeze)
+D_MODEL = 512
+STOCH_DIM = 32
+STOCH_CLASSES = 32
 
 tokenizer = Tokenizer()
 text_encoder = TextEncoder(vocab_size=16384, d_model=D_MODEL).to(device)
@@ -173,7 +176,7 @@ def tensor_step(input_text: str, input_image: torch.Tensor = None, input_audio: 
     # Latent Memory Renderer
     latent_geom = current_state['deter'][0].detach().cpu().numpy()
     latent_geom = ((latent_geom - latent_geom.min()) / (latent_geom.max() - latent_geom.min() + 1e-5) * 255).astype('uint8')
-    im = Image.fromarray(latent_geom.reshape(32, 64), mode='L').convert("P")
+    im = Image.fromarray(latent_geom.reshape(16, 32), mode='L').convert("P")
     im.putpalette([int(x) for x in range(256)] * 3)
     buf = io.BytesIO()
     im.save(buf, format="PNG")
@@ -277,9 +280,10 @@ async def autonomous_mind_loop():
     
     try:
         # Puxando o FineWeb (O mesmo que treinou o Llama 3) para Inteligência de texto real
-        ds_text = load_dataset("HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
-        ds_vision = load_dataset("mnist", split="train", streaming=True)
-        ds_audio = load_dataset("openslr/librispeech_asr", "default", split="validation", revision="refs/convert/parquet", streaming=True)
+        print("[MIND] Inicializando requests assincronas para dados do HuggingFace (não vai travar a porta 5000)...")
+        ds_text = await asyncio.to_thread(load_dataset, "HuggingFaceFW/fineweb", name="sample-10BT", split="train", streaming=True)
+        ds_vision = await asyncio.to_thread(load_dataset, "mnist", split="train", streaming=True)
+        ds_audio = await asyncio.to_thread(load_dataset, "openslr/librispeech_asr", "default", split="validation", revision="refs/convert/parquet", streaming=True)
         
         text_iter = iter(ds_text)
         vision_iter = iter(ds_vision)
@@ -308,14 +312,17 @@ async def autonomous_mind_loop():
         # TRAIN CONTINUOUSLY - NO WebSocket barrier! AGI trains even when nobody watches.
             
         try:
-            text_sample = next(text_iter)['text'].strip()
+            text_sample_data = await asyncio.to_thread(next, text_iter)
+            text_sample = text_sample_data['text'].strip()
             if not text_sample: continue
                 
-            img_sample = next(vision_iter)['image']
+            img_sample_data = await asyncio.to_thread(next, vision_iter)
+            img_sample = img_sample_data['image']
             img_tensor = trans_vis(img_sample).unsqueeze(0).to(device)
             
             try:
-                audio_sample = next(audio_iter)['audio']['array']
+                audio_sample_data = await asyncio.to_thread(next, audio_iter)
+                audio_sample = audio_sample_data['audio']['array']
                 audio_cropped = torch.tensor(audio_sample[:2000]).float().unsqueeze(0).unsqueeze(0).to(device)
             except Exception:
                 audio_cropped = torch.randn((1, 1, 2000)).float().to(device)
