@@ -109,7 +109,8 @@ def run_training(data_dir: str = None,
                  epochs: int = 100,
                  sample_interval: int = 50,
                  checkpoint_interval: int = 200,
-                 checkpoint_dir: str = None):
+                 checkpoint_dir: str = None,
+                 resume_checkpoint: str = None):
     """
     Run continuous training loop.
     
@@ -162,13 +163,18 @@ def run_training(data_dir: str = None,
         print(f"  Put .txt files in: {data_dir}")
         return
     
-    # Create substrate
-    print("\n  Creating CrushedSubstrate...")
-    substrate = CrushedSubstrate(
-        initial_concepts=initial_concepts,
-        embedding_dim=embedding_dim,
-        hdc_dim=hdc_dim
-    )
+    if resume_checkpoint and os.path.exists(resume_checkpoint):
+        print(f"\n  Loading substrate from {resume_checkpoint}...")
+        substrate = load_checkpoint(resume_checkpoint, embedding_dim=embedding_dim)
+        print(f"  Loaded vocab size: {substrate.vocab_size}")
+    else:
+        print("\n  Creating fresh CrushedSubstrate...")
+        substrate = CrushedSubstrate(
+            initial_concepts=initial_concepts,
+            embedding_dim=embedding_dim,
+            hdc_dim=hdc_dim
+        )
+        
     generator = NativeLanguageGenerator(substrate)
     
     # Training loop
@@ -339,6 +345,8 @@ if __name__ == '__main__':
                        help='Steps between sample generations')
     parser.add_argument('--checkpoint-interval', type=int, default=500,
                        help='Steps between checkpoints')
+    parser.add_argument('--resume', type=str, default=None,
+                       help='Path to checkpoint to resume from (e.g. for warm-start)')
     
     args = parser.parse_args()
     
@@ -349,4 +357,5 @@ if __name__ == '__main__':
         epochs=args.epochs,
         sample_interval=args.sample_interval,
         checkpoint_interval=args.checkpoint_interval,
+        resume_checkpoint=args.resume
     )
