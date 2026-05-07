@@ -4,14 +4,19 @@ NovaMind — HTTP API Server
 
 import os
 import json
+import time
+import threading
+import glob
+import re
 from flask import Flask, request, jsonify, send_from_directory
 from flask_cors import CORS
 
 import torch
 if not torch.cuda.is_available():
-    raise SystemError("GPU não encontrada, processamento limitado estritamente para a primeira GPU.")
-os.environ['CUDA_VISIBLE_DEVICES'] = "0"
-print(f"[INIT] Processamento estritamente na GPU: {torch.cuda.get_device_name(0)}")
+    print("[WARNING] GPU não encontrada ou CUDA não instalado. Rodando em CPU mode (Vai ser mais lento, mas funciona).")
+else:
+    os.environ['CUDA_VISIBLE_DEVICES'] = "0"
+    print(f"[INIT] Processamento estritamente na GPU: {torch.cuda.get_device_name(0)}")
 
 from core.mind import NovaMind
 
@@ -21,6 +26,52 @@ mind = NovaMind()
 # Flask app
 app = Flask(__name__, static_folder='web', static_url_path='')
 CORS(app)
+
+# Dreaming State
+is_dreaming = False
+dream_thread = None
+
+def dream_loop():
+    global is_dreaming
+    
+    # Extract sentences from training data
+    sentences = []
+    for filepath in glob.glob(os.path.join("data", "train", "*.txt")):
+        try:
+            with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+                # Simple sentence split
+                raw_sentences = re.split(r'[.!?]+', text)
+                for s in raw_sentences:
+                    s = s.strip()
+                    if len(s.split()) >= 3: # Only feed reasonable chunks
+                        sentences.append(s)
+        except Exception as e:
+            print(f"[DREAM] Erro ao ler {filepath}: {e}")
+            
+    if not sentences:
+        print("[DREAM] Nenhum texto encontrado em data/train/. Coloque um .txt lá.")
+        is_dreaming = False
+        return
+
+    print(f"[DREAM] Iniciando sonho profundo com {len(sentences)} sequências de memória...")
+    
+    # Loop over sentences while dreaming
+    idx = 0
+    while is_dreaming:
+        sentence = sentences[idx % len(sentences)]
+        idx += 1
+        
+        try:
+            # The mind processes the input autonomously
+            mind.think(sentence)
+        except Exception as e:
+            print(f"[DREAM] Erro cognitivo durante o sonho: {e}")
+            
+        # Give it a tiny break to not freeze the API
+        time.sleep(1.5)
+
+    print("[DREAM] Córtex retornou ao estado de vigília (Dreaming pausado).")
 
 
 @app.route('/')
@@ -39,6 +90,24 @@ def think():
     thought = mind.think(raw_input)
     return jsonify(thought)
 
+@app.route('/api/dream', methods=['POST'])
+def toggle_dream():
+    """Toggle background autonomous reading/training mode."""
+    global is_dreaming, dream_thread
+    
+    data = request.get_json() or {}
+    enable = data.get('enable', not is_dreaming)
+    
+    if enable and not is_dreaming:
+        is_dreaming = True
+        dream_thread = threading.Thread(target=dream_loop, daemon=True)
+        dream_thread.start()
+        return jsonify({'status': 'dreaming', 'message': 'Área de Broca iniciou consolidação autônoma de linguagem.'})
+    elif not enable and is_dreaming:
+        is_dreaming = False
+        return jsonify({'status': 'awake', 'message': 'Córtex despertou.'})
+        
+    return jsonify({'status': 'dreaming' if is_dreaming else 'awake'})
 
 @app.route('/api/state', methods=['GET'])
 def get_state():
@@ -88,7 +157,7 @@ def get_concepts():
 
 if __name__ == '__main__':
     print("\n" + "="*60)
-    print("  🧠 NovaMind — 7-Layer AGI Architecture Prototype")
+    print("  >> NovaMind — 7-Layer AGI Architecture Prototype")
     print("="*60)
     print(f"  Dashboard: http://localhost:5000")
     print(f"  API:       http://localhost:5000/api/")

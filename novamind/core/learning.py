@@ -138,6 +138,9 @@ class ContinuousLearningEngine:
         self.total_updates += 1
         self.learning_events.extend(report['events'])
 
+        # Convert events to dicts for JSON serialization
+        report['events'] = [e.to_dict() for e in report['events']]
+
         report['total_updates'] = self.total_updates
         report['total_events'] = len(self.learning_events)
 

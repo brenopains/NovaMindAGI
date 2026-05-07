@@ -78,9 +78,22 @@ class PerceptionEngine:
         
         # NovaCrush Integration: Use CrushedSubstrate with ternary weights + HDC
         if NOVACRUSH_ENABLED:
-            self.neural_substrate = NeuralSubstrate(
-                initial_concepts=8, embedding_dim=GA_DIM, hdc_dim=4096
-            )
+            import os
+            import torch
+            from .novacrush.train_loop import load_checkpoint
+            
+            # Load the distilled grammar if it exists, otherwise start fresh
+            ckpt_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'checkpoints', 'substrate_distilled.pt')
+            
+            if os.path.exists(ckpt_path):
+                print(f"[BOOT] Carregando Córtex Destilado (Fluência Nativa) de: {ckpt_path}")
+                self.neural_substrate = load_checkpoint(ckpt_path, embedding_dim=768)
+                # GA_DIM will be overridden for geometric alignment if needed
+            else:
+                self.neural_substrate = NeuralSubstrate(
+                    initial_concepts=8, embedding_dim=GA_DIM, hdc_dim=4096
+                )
+            
             self.spike_detector = SpikeDetector(base_threshold=0.05)
             self._cached_topology = None
         else:

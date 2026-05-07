@@ -1,7 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Activity, BrainCircuit, Terminal, Cpu, MessageSquare } from 'lucide-react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Activity, BrainCircuit, Terminal, Cpu, MessageSquare, Moon, Sun } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import { motion, AnimatePresence } from 'framer-motion';
+import ForceGraph2D from 'react-force-graph-2d';
 
 const NovaDashboard = () => {
   const [messages, setMessages] = useState([
@@ -9,6 +10,7 @@ const NovaDashboard = () => {
   ]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isDreaming, setIsDreaming] = useState(false);
   const [systemState, setSystemState] = useState(null);
   
   const messagesEndRef = useRef(null);
@@ -78,15 +80,51 @@ const NovaDashboard = () => {
     }
   };
 
-  // Mock data for curriculum chart until we have real streaming data
-  const trainingData = [
-    { step: 0, surprise: 0.95 },
-    { step: 200, surprise: 0.88 },
-    { step: 400, surprise: 0.72 },
-    { step: 600, surprise: 0.65 },
-    { step: 800, surprise: 0.58 },
-    { step: 1000, surprise: 0.51 }
-  ];
+  // Real data for the chart!
+  const trainingData = useMemo(() => {
+    if (!systemState || !systemState.learning || !systemState.learning.accuracy_history) return [];
+    // We map accuracy history and surprise history
+    const history = systemState.learning.accuracy_history;
+    return history.map((acc, i) => ({
+      step: i,
+      accuracy: acc * 100,
+    }));
+  }, [systemState]);
+
+  // Real data for the geometric graph!
+  const graphData = useMemo(() => {
+    if (!systemState || !systemState.world_model) return { nodes: [], links: [] };
+    
+    // We limit nodes to 300 to not freeze the browser, but these are real concepts!
+    const wm = systemState.world_model;
+    const allNodes = wm.nodes || [];
+    const allEdges = wm.edges || [];
+    
+    // Pick top 300 nodes to render
+    const displayNodes = allNodes.slice(0, 300).map(n => ({ id: n.id, label: n.label }));
+    const displayNodeIds = new Set(displayNodes.map(n => n.id));
+    
+    const displayLinks = allEdges
+      .filter(e => displayNodeIds.has(e.source) && displayNodeIds.has(e.target))
+      .map(e => ({ source: e.source, target: e.target, value: e.weight }));
+
+    return { nodes: displayNodes, links: displayLinks };
+  }, [systemState]);
+
+  const toggleDream = async () => {
+    try {
+      const res = await fetch('http://localhost:5000/api/dream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enable: !isDreaming })
+      });
+      const data = await res.json();
+      setIsDreaming(data.status === 'dreaming');
+      setMessages(prev => [...prev, { role: 'bot', text: data.message }]);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   return (
     <div className="flex h-screen p-4 gap-4 bg-background text-slate-200 font-sans">
@@ -113,19 +151,24 @@ const NovaDashboard = () => {
               </div>
             </div>
             
-            {/* Decorative particles */}
-            {[...Array(15)].map((_, i) => (
-              <motion.div
-                key={i}
-                className="absolute w-1 h-1 bg-neonPurple rounded-full shadow-[0_0_10px_#8b5cf6]"
-                animate={{
-                  x: [Math.random() * 200 - 100, Math.random() * 200 - 100],
-                  y: [Math.random() * 200 - 100, Math.random() * 200 - 100],
-                  opacity: [0.2, 1, 0.2]
-                }}
-                transition={{ duration: Math.random() * 5 + 5, repeat: Infinity, ease: "linear" }}
-              />
-            ))}
+            {/* Realtime 2D Force Graph using actual backend data */}
+            {graphData.nodes.length > 0 ? (
+              <div className="absolute inset-0">
+                <ForceGraph2D
+                  graphData={graphData}
+                  nodeRelSize={4}
+                  nodeColor={() => '#8b5cf6'}
+                  linkColor={() => 'rgba(139, 92, 246, 0.2)'}
+                  backgroundColor="transparent"
+                  width={300}
+                  height={300}
+                />
+              </div>
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center text-xs text-slate-500">
+                Aguardando consolidação do World Model...
+              </div>
+            )}
           </div>
         </div>
 
@@ -144,7 +187,7 @@ const NovaDashboard = () => {
                   contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b' }}
                   itemStyle={{ color: '#3b82f6' }}
                 />
-                <Line type="monotone" dataKey="surprise" stroke="#3b82f6" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="accuracy" stroke="#3b82f6" strokeWidth={2} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -159,6 +202,13 @@ const NovaDashboard = () => {
             <h1 className="font-bold text-lg tracking-wide">NovaCrush Interface</h1>
           </div>
           <div className="flex items-center gap-4 text-xs text-slate-400 font-mono">
+            <button 
+              onClick={toggleDream}
+              className={`flex items-center gap-2 px-3 py-1 rounded-md transition-colors ${isDreaming ? 'bg-indigo-600/30 text-indigo-300' : 'hover:bg-white/5'}`}
+            >
+              {isDreaming ? <Moon size={14} className="animate-pulse" /> : <Sun size={14} />}
+              {isDreaming ? 'DREAMING' : 'WAKE'}
+            </button>
             <div className="flex items-center gap-1"><Cpu size={14}/> RTX 3050</div>
             <div className="flex items-center gap-1">Cycle {systemState?.cycle_count || 0}</div>
           </div>
@@ -234,10 +284,11 @@ const NovaDashboard = () => {
           <div className="text-emerald-500/50">{'>>'} Initialization complete</div>
           <div className="text-emerald-500/50">{'>>'} Loaded 4000 core concepts</div>
           <div className="text-emerald-500/50">{'>>'} Transition matrix ready</div>
-          {messages.filter(m => m.role === 'bot' && !m.error).map((msg, i) => (
+          {systemState?.thought_history?.map((thought, i) => (
             <div key={i} className="pt-2 border-t border-white/5">
-              <span className="text-accent">{'[GEN]'}</span> Walking substrate trajectory...<br/>
-              <span className="text-slate-300">"{msg.text}"</span>
+              <span className="text-accent">{'[GEN]'}</span> Cycle {thought.cycle}: Walking substrate trajectory...<br/>
+              <span className="text-slate-300 text-[10px]">IN: {thought.input || "(Dreaming)"}</span><br/>
+              <span className="text-emerald-300">"{thought.response_preview}"</span>
             </div>
           ))}
         </div>
