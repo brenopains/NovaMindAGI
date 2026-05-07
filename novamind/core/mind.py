@@ -31,6 +31,13 @@ from .metacognition import MetacognitionSystem
 from .goals import GoalSystem
 from .learning import ContinuousLearningEngine
 
+# NovaCrush Integration
+try:
+    from .novacrush.genetic_memory import GeneticOptimizer, Genome
+    NOVACRUSH_AVAILABLE = True
+except ImportError:
+    NOVACRUSH_AVAILABLE = False
+
 
 class NovaMind:
     """
@@ -47,6 +54,14 @@ class NovaMind:
         self.metacognition = MetacognitionSystem()  # Layer 5
         self.goals = GoalSystem()                   # Layer 6
         self.learning = ContinuousLearningEngine()  # Layer 7
+
+        # NovaCrush: Genetic compression for periodic genome snapshots
+        if NOVACRUSH_AVAILABLE:
+            self.genetic_optimizer = GeneticOptimizer(population_size=10)
+            self.genome_checkpoint_interval = 50  # Compress genome every N cycles
+            self.last_genome = None
+        else:
+            self.genetic_optimizer = None
 
         # Cycle counter
         self.cycle_count = 0
@@ -144,6 +159,24 @@ class NovaMind:
         )
         thought['layers']['learning'] = learning_report
 
+        # NovaCrush: Periodic genetic compression checkpoint (saves genome snapshot)
+        if (self.genetic_optimizer and 
+            self.cycle_count % self.genome_checkpoint_interval == 0 and
+            self.cycle_count > 0):
+            try:
+                import torch
+                substrate = self.perception.neural_substrate
+                weights = {
+                    'embeddings': substrate.embeddings.data.clone(),
+                }
+                if hasattr(substrate, 'transition'):
+                    weights['transition'] = substrate.transition.weight.data.clone()
+                self.last_genome = self.genetic_optimizer.compress_weights(
+                    weights, generations=10
+                )
+            except Exception:
+                pass  # Non-critical — genome checkpoint is optional
+
         # ═══════════════════════════════════════════════
         # SYNTHESIS (Generating Native Signal Array)
         # ═══════════════════════════════════════════════
@@ -180,6 +213,7 @@ class NovaMind:
         reasoning = thought['layers'].get('reasoning', {})
         metacognition = thought['layers'].get('metacognition', {})
         learning = thought['layers'].get('learning', {})
+        perception_data = thought['layers'].get('perception', {})
 
         consensus = reasoning.get('consensus', {})
         reasoning_conclusion = consensus.get('conclusion', 'Processing...')
@@ -191,6 +225,7 @@ class NovaMind:
         parts.append(f"\n*(Topological Confidence: {confidence:.0%})*")
 
         # Self-assessment
+        self_assessment = metacognition.get('self_assessment', {})
         assessment_text = self_assessment.get('text', '')
         if assessment_text:
             parts.append(f"\n**Self-Assessment:** {assessment_text}")
@@ -198,14 +233,20 @@ class NovaMind:
         # Learning highlights
         novelty = learning.get('novelty_analysis', {})
         if novelty.get('is_novel'):
-            parts.append(f"\n**🆕 Novel input detected** — updating knowledge base")
+            parts.append(f"\n**NEW: Novel input detected** -- updating knowledge base")
 
         # Knowledge metrics
-        concept_count = perception.get('total_concepts_known', 0)
+        concept_count = perception_data.get('total_concepts_known', 0)
+
+        # NovaCrush compression indicator
+        crush_info = ''
+        if hasattr(self.perception, 'novacrush_enabled') and self.perception.novacrush_enabled:
+            crush_info = ' | NovaCrush ON'
+
         parts.append(f"\n*[Cycle #{thought['cycle']} | "
                     f"{concept_count} concepts | "
                     f"{confidence:.0%} confident | "
-                    f"{thought.get('cycle_time_ms', 0):.0f}ms]*")
+                    f"{thought.get('cycle_time_ms', 0):.0f}ms{crush_info}]*")
 
         return {
             'text': '\n'.join(parts),
@@ -216,12 +257,13 @@ class NovaMind:
 
     def get_full_state(self) -> Dict:
         """Return the complete mind state for the dashboard."""
-        return {
+        state = {
             'cycle_count': self.cycle_count,
             'uptime_seconds': time.time() - self.start_time,
             'perception': {
                 'total_concepts': len(self.perception.concept_registry),
                 'all_concepts': self.perception.get_all_concepts(),
+                'novacrush_enabled': getattr(self.perception, 'novacrush_enabled', False),
             },
             'world_model': self.world_model.get_graph_data(),
             'memory': {
@@ -237,3 +279,15 @@ class NovaMind:
             'learning': self.learning.get_stats(),
             'thought_history': self.thought_history,
         }
+
+        # NovaCrush stats
+        if NOVACRUSH_AVAILABLE and hasattr(self.perception, 'novacrush_enabled'):
+            if self.perception.novacrush_enabled:
+                substrate = self.perception.neural_substrate
+                state['novacrush'] = {
+                    'compression': substrate.get_compression_stats(),
+                    'forward_forward': substrate.get_ff_stats(),
+                    'last_genome_bytes': len(self.last_genome.serialize()) if self.last_genome else None,
+                }
+
+        return state

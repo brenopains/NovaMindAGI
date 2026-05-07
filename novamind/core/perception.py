@@ -3,6 +3,13 @@ NovaMind — Layer 1: Genuine PyTorch Perception Engine
 ======================================================
 Replaced static string hashing with a continuous training Neural Topology. 
 Text -> PyTorch Continuous Predictor -> Live Geometric Tensors -> Hyperbolic Concept Setup.
+
+NovaCrush Integration (v0.2):
+    - CrushedSubstrate replaces DynamicPredictiveNetwork
+    - BitLinear ternary weights (16x inference compression)
+    - HDC holographic memory (one-shot concept learning)
+    - Forward-Forward local training (no backprop memory overhead)
+    - Spike-gated topology extraction (skip redundant recomputation)
 """
 
 import numpy as np
@@ -16,7 +23,15 @@ import torch.nn.functional as F
 
 from .math.hyperbolic import PoincareBall
 from .math.geometric_algebra import CliffordAlgebra, MultiVector
-from .neural_substrate import DynamicPredictiveNetwork
+
+# NovaCrush Integration: Use CrushedSubstrate if available, fallback to original
+try:
+    from .novacrush.crushed_substrate import CrushedSubstrate as NeuralSubstrate
+    from .novacrush.spike_engine import SpikeDetector
+    NOVACRUSH_ENABLED = True
+except ImportError:
+    from .neural_substrate import DynamicPredictiveNetwork as NeuralSubstrate
+    NOVACRUSH_ENABLED = False
 
 CONCEPT_DIM = 32
 GA_DIM = 8
@@ -61,8 +76,19 @@ class PerceptionEngine:
         self.algebra = CliffordAlgebra(p=GA_DIM)
         self.concept_registry: Dict[str, ConceptNode] = {}
         
-        # Instantiate the GENUINE PyTorch Continuous Core
-        self.neural_substrate = DynamicPredictiveNetwork(initial_concepts=8, embedding_dim=GA_DIM)
+        # NovaCrush Integration: Use CrushedSubstrate with ternary weights + HDC
+        if NOVACRUSH_ENABLED:
+            self.neural_substrate = NeuralSubstrate(
+                initial_concepts=8, embedding_dim=GA_DIM, hdc_dim=4096
+            )
+            self.spike_detector = SpikeDetector(base_threshold=0.05)
+            self._cached_topology = None
+        else:
+            self.neural_substrate = NeuralSubstrate(initial_concepts=8, embedding_dim=GA_DIM)
+            self.spike_detector = None
+            self._cached_topology = None
+        
+        self.novacrush_enabled = NOVACRUSH_ENABLED
 
     def perceive(self, raw_input: str) -> Dict:
         start_time = time.time()
@@ -107,7 +133,12 @@ class PerceptionEngine:
             concept.familiarity = 1.0 - surprise
             
         # 2. Causality Extraction strictly from PyTorch Transition Matrix
-        topology_matrix = self.neural_substrate.get_topology_matrix()
+        # NovaCrush: Spike-gated — only recompute topology when surprise is high
+        if self.spike_detector is not None and surprise < 0.3 and self._cached_topology is not None:
+            topology_matrix = self._cached_topology  # Reuse cached (free!)
+        else:
+            topology_matrix = self.neural_substrate.get_topology_matrix()
+            self._cached_topology = topology_matrix
         relations = []
         for i, source_concept in enumerate(atoms):
              s_idx = self.neural_substrate.get_token_id(source_concept.label)
