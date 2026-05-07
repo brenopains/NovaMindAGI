@@ -59,17 +59,27 @@ def dream_loop():
     # Loop over sentences while dreaming
     idx = 0
     while is_dreaming:
-        sentence = sentences[idx % len(sentences)]
+        # Pega a frase, mas usa só as 10 primeiras palavras pra não estourar a VRAM
+        sentence_words = sentences[idx % len(sentences)].split()[:10]
+        sentence = " ".join(sentence_words)
         idx += 1
         
         try:
             # The mind processes the input autonomously
             mind.think(sentence)
+            
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
         except Exception as e:
             print(f"[DREAM] Erro cognitivo durante o sonho: {e}")
             
-        # Give it a tiny break to not freeze the API
-        time.sleep(1.5)
+        # Break em pequenos passos para a API não travar se o usuário clicar WAKE
+        for _ in range(10):
+            if not is_dreaming:
+                break
+            time.sleep(0.3)
 
     print("[DREAM] Córtex retornou ao estado de vigília (Dreaming pausado).")
 

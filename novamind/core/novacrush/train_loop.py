@@ -321,8 +321,8 @@ def load_checkpoint(path: str, embedding_dim: int = 32) -> CrushedSubstrate:
     )
     
     with torch.no_grad():
-        substrate.embeddings = torch.nn.Parameter(state['embeddings'])
-        substrate.transition.weight = torch.nn.Parameter(state['transition_weight'])
+        substrate.embeddings = torch.nn.Parameter(state['embeddings'].to(substrate.device))
+        substrate.transition.weight = torch.nn.Parameter(state['transition_weight'].to(substrate.device))
     
     substrate.token_to_id = state['token_to_id']
     substrate.id_to_token = state['id_to_token']
