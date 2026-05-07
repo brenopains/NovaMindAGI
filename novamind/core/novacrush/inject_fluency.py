@@ -98,21 +98,97 @@ def inject_fluency(target_dim: int = 64, max_vocab: int = 4000):
     substrate.embeddings = torch.nn.Parameter(new_embeddings)
     substrate.vocab_size = len(selected_tokens)
     
-    print(">> Injecting Ternary Grammar (Transition Matrix)...")
-    # To get grammatical transitions, we approximate the attention/MLP layers 
-    # by taking the direct projection from embedding to LM head.
-    # P(next | current) ~= Embeddings * LM_Head^T
+    print(">> Injecting Real Grammar Transition (from LM Head)...")
+    # The LM head in GPT2 maps: hidden_state -> logits over vocab.
+    # For our filtered vocab, we compute:
+    #   transition(embedding_A) ≈ embedding_B  where B is the most likely next token.
+    #
+    # We approximate this by: T = E_filtered^+ * LM_head^T * E_filtered
+    # where E_filtered^+ is the pseudo-inverse of our filtered embedding matrix.
+    # This gives us a transition in embedding space that encodes real English grammar.
     
-    # But since we use a direct transition matrix `transition(x)`, we want:
-    # transition.weight * embedding = next_embedding
-    
-    # We will initialize the transition matrix with an identity + local mixing
-    # to preserve the semantic structure, and let the first training pass adapt it.
     with torch.no_grad():
-        # Diagonal dominance + small noise for transition
-        identity_mix = torch.eye(model_dim) * 0.5
-        noise = torch.randn(model_dim, model_dim) * 0.05
-        substrate.transition.weight.data = identity_mix + noise
+        # The lm_head in distilgpt2 shares weights with wte (tied embeddings)
+        # So lm_head(x) = x @ wte.T, meaning P(next_token) = softmax(h @ E.T)
+        # For our transition: we want T such that T @ e_A ≈ e_B
+        # We use the first transformer layer's attention output projection as a proxy
+        
+        # Actually, the simplest and most effective approach:
+        # Run a few hundred real sentences through the model and collect
+        # (current_embedding, next_embedding) pairs to fit the transition via least squares.
+        
+        print("   Computing transition matrix from real text sequences...")
+        
+        # Generate training pairs from the model itself
+        sample_texts = [
+            "The cat sat on the mat and looked at the door",
+            "She went to the store and bought some food",
+            "He said that he would come back later today",
+            "They have been working on this project for years",
+            "The weather was very cold and it started to rain",
+            "I think we should go home now before it gets dark",
+            "The children played in the park until the sun went down",
+            "She opened the book and started to read the first chapter",
+            "The old man walked slowly down the street",
+            "We need to find a better way to solve this problem",
+            "The dog ran across the field and jumped over the fence",
+            "He was very happy when he heard the good news",
+            "The teacher asked the students to open their books",
+            "She told him that she loved him very much",
+            "The music was so beautiful that everyone stopped to listen",
+            "They decided to move to a new city next year",
+            "The baby started to cry when the lights went out",
+            "He picked up the phone and called his mother",
+            "The flowers in the garden were blooming beautifully",
+            "She could not believe what she was seeing",
+            "The train arrived at the station right on time",
+            "He put on his coat and went outside into the cold",
+            "The birds were singing in the trees early in the morning",
+            "She smiled and said hello to her old friend",
+            "The river flowed quietly through the green valley",
+            "He worked hard every day to support his family",
+            "The stars were shining brightly in the clear night sky",
+            "She took a deep breath and opened the door",
+            "The king sat upon his throne and ruled the land",
+            "Alice was beginning to get very tired of sitting",
+        ]
+        
+        # Collect (input_emb, target_emb) pairs
+        all_inputs = []
+        all_targets = []
+        
+        for text in sample_texts:
+            tokens_enc = tokenizer.encode(text, add_special_tokens=False)
+            for i in range(len(tokens_enc) - 1):
+                tok_a = tokenizer.decode([tokens_enc[i]]).strip().lower()
+                tok_b = tokenizer.decode([tokens_enc[i+1]]).strip().lower()
+                
+                if tok_a in substrate.token_to_id and tok_b in substrate.token_to_id:
+                    id_a = substrate.token_to_id[tok_a]
+                    id_b = substrate.token_to_id[tok_b]
+                    all_inputs.append(new_embeddings[id_a])
+                    all_targets.append(new_embeddings[id_b])
+        
+        print(f"   Collected {len(all_inputs)} transition pairs from sample sentences.")
+        
+        if len(all_inputs) > 10:
+            X = torch.stack(all_inputs)  # [N, 768]
+            Y = torch.stack(all_targets)  # [N, 768]
+            
+            # Least squares: find T such that T @ X.T ≈ Y.T
+            # => T = Y.T @ X @ (X.T @ X)^-1
+            # Using torch.linalg.lstsq for numerical stability
+            solution = torch.linalg.lstsq(X, Y)
+            T = solution.solution  # [768, 768]
+            
+            # Mix with small identity for stability
+            T = 0.8 * T + 0.2 * torch.eye(model_dim)
+            
+            substrate.transition.weight.data = T.to(substrate.transition.weight.device)
+            print("   Transition matrix injected with REAL grammatical patterns!")
+        else:
+            print("   WARNING: Not enough transition pairs, using identity fallback.")
+            substrate.transition.weight.data = torch.eye(model_dim) * 0.5 + torch.randn(model_dim, model_dim) * 0.05
 
     # Save the injected checkpoint
     checkpoint_dir = os.path.join(PROJECT_ROOT, 'checkpoints')
@@ -136,6 +212,8 @@ def inject_fluency(target_dim: int = 64, max_vocab: int = 4000):
     
     # Test generation with the injected knowledge
     print("\n>> Initial Broca's Area Test (No training yet):")
+    substrate = substrate.cpu()  # Ensure all on same device for test
+    substrate.device = torch.device('cpu')
     generator = NativeLanguageGenerator(substrate)
     for seed in ["the", "he", "it"]:
         if seed in substrate.token_to_id:

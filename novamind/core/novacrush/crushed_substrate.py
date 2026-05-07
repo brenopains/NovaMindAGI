@@ -115,53 +115,50 @@ class CrushedSubstrate(nn.Module):
 
     def continuous_train(self, tokens_stream: List[str]) -> float:
         """
-        Genuine continuous training — called on EVERY input.
+        Batch-accelerated continuous training on GPU.
         
-        Combines:
-        1. Predictive coding (like original) but with ternary weights
-        2. Forward-Forward local learning for surprise calibration
-        3. HDC memory update for associative storage
+        Instead of looping over bigrams one-by-one (slow Python loop),
+        we batch ALL bigram pairs into tensors and do ONE matrix operation.
+        This lets CUDA parallelize the entire training step.
         
-        Memory usage: ~3x less than original due to ternary + FF
+        The transition matrix learns: given embedding[A], predict embedding[B].
+        Over thousands of sentences, it learns real grammar patterns.
         """
         indices = [self.get_token_id(t) for t in tokens_stream]
         if len(indices) < 2:
             return 0.0
 
-        total_surprise = 0.0
+        # === BATCH PREDICTIVE CODING ===
+        # Build ALL bigram pairs at once
+        inp_ids = torch.tensor(indices[:-1], dtype=torch.long, device=self.device)
+        tgt_ids = torch.tensor(indices[1:], dtype=torch.long, device=self.device)
 
-        # === PREDICTIVE CODING WITH TERNARY WEIGHTS ===
-        for i in range(len(indices) - 1):
-            inp = torch.tensor([indices[i]], dtype=torch.long, device=self.device)
-            tgt = torch.tensor([indices[i + 1]], dtype=torch.long, device=self.device)
+        # Forward: predict next embedding from current
+        predictions = self.forward(inp_ids)  # [N, embed_dim]
+        targets = self.embeddings[tgt_ids].detach()  # [N, embed_dim]
 
-            predictions = self.forward(inp)
-            targets = self.embeddings[tgt].detach()
+        # Cosine surprise for the entire batch
+        surprise = 1.0 - F.cosine_similarity(predictions, targets, dim=-1)  # [N]
+        loss = surprise.mean()
 
-            surprise = 1.0 - F.cosine_similarity(predictions, targets, dim=-1)
-            loss = surprise.mean()
+        # Compute gradients in one shot
+        grad_embed = torch.autograd.grad(loss, self.embeddings, retain_graph=True)[0]
+        grad_transition_params = torch.autograd.grad(
+            loss, self.transition.parameters(), retain_graph=False,
+            allow_unused=True
+        )
 
-            # Compute gradients
-            grad_embed = torch.autograd.grad(loss, self.embeddings, retain_graph=True)[0]
-            # Transition layer has its own optimizer path via BitLinear
-            grad_transition_params = torch.autograd.grad(
-                loss, self.transition.parameters(), retain_graph=False,
-                allow_unused=True
-            )
+        # Apply gradients with aggressive learning rate for real convergence
+        effective_lr = self.lr * 5.0  # 5x boost for batch mode
+        with torch.no_grad():
+            self.embeddings -= effective_lr * grad_embed
+            for param, grad in zip(self.transition.parameters(), grad_transition_params):
+                if grad is not None:
+                    param -= effective_lr * grad
 
-            with torch.no_grad():
-                self.embeddings -= self.lr * grad_embed
-                for param, grad in zip(self.transition.parameters(), grad_transition_params):
-                    if grad is not None:
-                        param -= self.lr * grad
-
-            total_surprise += loss.item()
-
-            if loss.item() > self.neurogenesis_threshold:
-                self._spawn_neuron()
+        total_surprise = loss.item()
 
         # === FORWARD-FORWARD TRAINING ===
-        # Use predicted vs actual as positive/negative pairs
         if len(indices) >= 4:
             with torch.no_grad():
                 pos_indices = torch.tensor(indices[:len(indices) // 2],
@@ -180,10 +177,9 @@ class CrushedSubstrate(nn.Module):
             self.hdc_memory.store_sequence(seq_label, tokens_stream[:10])
 
         self._total_train_steps += 1
-        avg_surprise = total_surprise / max(1, len(indices) - 1)
-        self._total_surprise += avg_surprise
+        self._total_surprise += total_surprise
 
-        return avg_surprise
+        return total_surprise
 
     def _spawn_neuron(self):
         """

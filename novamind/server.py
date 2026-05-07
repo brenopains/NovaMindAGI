@@ -59,8 +59,8 @@ def dream_loop():
     # Loop over sentences while dreaming
     idx = 0
     while is_dreaming:
-        # Pega a frase, mas usa só as 10 primeiras palavras pra não estourar a VRAM
-        sentence_words = sentences[idx % len(sentences)].split()[:10]
+        # Pega a frase, usa ate 20 palavras pra treinar bigrams reais
+        sentence_words = sentences[idx % len(sentences)].split()[:20]
         sentence = " ".join(sentence_words)
         idx += 1
         
@@ -75,11 +75,11 @@ def dream_loop():
         except Exception as e:
             print(f"[DREAM] Erro cognitivo durante o sonho: {e}")
             
-        # Break em pequenos passos para a API não travar se o usuário clicar WAKE
-        for _ in range(10):
+        # Pausa curta - o batch training na GPU e rapido agora
+        for _ in range(4):
             if not is_dreaming:
                 break
-            time.sleep(0.3)
+            time.sleep(0.25)
 
     print("[DREAM] Córtex retornou ao estado de vigília (Dreaming pausado).")
 
