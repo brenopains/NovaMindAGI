@@ -30,6 +30,7 @@ from .reasoning import HybridReasoningEngine
 from .metacognition import MetacognitionSystem
 from .goals import GoalSystem
 from .learning import ContinuousLearningEngine
+from .language_cortex import NativeLanguageCortex
 
 # NovaCrush Integration
 try:
@@ -54,6 +55,9 @@ class NovaMind:
         self.metacognition = MetacognitionSystem()  # Layer 5
         self.goals = GoalSystem()                   # Layer 6
         self.learning = ContinuousLearningEngine()  # Layer 7
+
+        # Language Cortex (Broca's Area) - powered by NovaCrush natively
+        self.language = NativeLanguageCortex(substrate=getattr(self.perception, 'neural_substrate', None))
 
         # NovaCrush: Genetic compression for periodic genome snapshots
         if NOVACRUSH_AVAILABLE:
@@ -218,11 +222,17 @@ class NovaMind:
         consensus = reasoning.get('consensus', {})
         reasoning_conclusion = consensus.get('conclusion', 'Processing...')
         
+        # Native Language Generation!
+        # Convert conclusion string to concepts
+        predicted_concepts = self.language.parse_to_concepts(reasoning_conclusion)
+        # Generate fluent sentence
+        fluent_response = self.language.generate_fluent_thought(thought.get('raw_input', ''), predicted_concepts)
+        
         confidence = metacognition.get('confidence', {}).get('overall', 0.5)
 
         parts = []
-        parts.append(f"**Topological Prediction:** {reasoning_conclusion}")
-        parts.append(f"\n*(Topological Confidence: {confidence:.0%})*")
+        parts.append(f"**NovaCrush Native Response:** {fluent_response}")
+        parts.append(f"*(Topological Prediction: {reasoning_conclusion})*")
 
         # Self-assessment
         self_assessment = metacognition.get('self_assessment', {})

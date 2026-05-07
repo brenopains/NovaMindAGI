@@ -1,85 +1,76 @@
 """
-NovaMind — The Language Cortex (Broca/Wernicke's Area)
-======================================================
-This module solves the "Alien Language" problem. It serves as a biological
-interpreter between the fluent, unstructured human language and the pure,
-highly compressed geometric concepts of the PyTorch neural substrate.
+NovaMind — The Native Language Cortex (Broca/Wernicke's Area)
+=============================================================
+This module is the biological interpreter between human language and 
+the pure geometric concepts of the PyTorch neural substrate.
 
-It leverages a standard LLM (e.g. Google Gemini API) purely as the sensory and 
-vocal organ, NOT for reasoning. The LLM translates:
-  Human Text -> Abstract Concepts -> [PyTorch Neural Substrate] -> Predicted Concepts -> Fluency
+DeepSeek's "Andaime Semântico" (Semantic Skeleton) Architecture:
+1. Wernicke's Area (Comprehension): Maps input words to geometric concepts.
+2. Broca's Area (Production): Translates geometric predictions back to human text
+   using the NativeLanguageGenerator (CrushedSubstrate transitions).
+   
+Zero external LLM. Pure continuous learning.
 """
 
-import os
-import json
 import logging
 from typing import List, Dict
 
 try:
-    import google.generativeai as genai
-    HAS_GOOGLE_API = True
+    from .novacrush.language_gen import NativeLanguageGenerator
+    from .novacrush.crushed_substrate import CrushedSubstrate
+    NOVACRUSH_ENABLED = True
 except ImportError:
-    HAS_GOOGLE_API = False
+    NOVACRUSH_ENABLED = False
 
-class LanguageCortex:
-    def __init__(self, api_key=None):
-        self.api_key = api_key or os.environ.get("GEMINI_API_KEY")
-        self.is_active = False
+class NativeLanguageCortex:
+    def __init__(self, substrate=None):
+        self.is_active = True
+        self.substrate = substrate
+        self.generator = None
         
-        if self.api_key and HAS_GOOGLE_API:
-            genai.configure(api_key=self.api_key)
-            # Use gemini-1.5-flash as it is extremely fast, perfect for sensory processing
-            self.model = genai.GenerativeModel('gemini-1.5-flash')
-            self.is_active = True
-            logging.info("🧠 Language Cortex initialized with Google AI API.")
+        if NOVACRUSH_ENABLED and self.substrate:
+            self.generator = NativeLanguageGenerator(self.substrate)
+            logging.info("🧠 Native Language Cortex initialized with NovaCrush Engine.")
         else:
-            logging.warning("⚠️ Language Cortex is in 'Offline Mute' mode. Missing Google AI capability or API key.")
+            logging.warning("⚠️ Native Language Cortex is active but missing NovaCrush substrate.")
 
     def parse_to_concepts(self, human_text: str) -> List[str]:
         """
         Wernicke's Area (Comprehension):
-        Converts messy human sentences into pure conceptual atoms to feed into 
-        the PyTorch geometry engine.
+        Converts messy human sentences into pure conceptual atoms.
+        In the native version, we extract base tokens that the substrate knows.
         """
-        if not self.is_active:
-            # Fallback trivial extraction if no API key
-            return [w for w in human_text.lower().split() if len(w) > 3]
-
-        prompt = f'''
-        You are the sensory cortex of an AGI. The human said: "{human_text}"
-        Extract only the core atomic concepts (entities, actions, abstract ideas) as a comma-separated list of words.
-        Return ONLY the words, nothing else. Example: "evolution, humanity, emotion, logic"
-        '''
-        try:
-            response = self.model.generate_content(prompt)
-            concepts = [c.strip().lower() for c in response.text.split(',')]
-            return [c for c in concepts if c]
-        except Exception as e:
-            logging.error(f"Language Cortex Parse Error: {e}")
-            return [w for w in human_text.lower().split() if len(w) > 3]
+        # Simple tokenization
+        words = [w.strip().lower() for w in human_text.replace('.', ' ').replace(',', ' ').split() if len(w) > 2]
+        return words
 
     def generate_fluent_thought(self, prompt_text: str, predicted_concepts: List[str]) -> str:
         """
         Broca's Area (Production):
         The PyTorch Topological engine has decided what concepts should follow.
-        This function turns those raw concepts back into perfect, fluent human language.
+        This uses the learned transitions to generate text.
         """
-        if not self.is_active:
-             return f"Internal geometric trajectory suggests: {', '.join(predicted_concepts)}"
+        if not self.generator:
+            return f"Internal trajectory: {', '.join(predicted_concepts)}"
 
-        prompt = f'''
-        You are the vocal cortex of an AGI.
-        The human prompt was: "{prompt_text}"
-        Your internal geometric reasoning engine mathematically predicted these 
-        concepts should form the answer: {predicted_concepts}
+        if not predicted_concepts:
+            return "..."
+
+        # Seed generation with the most critical predicted concept
+        seed_concept = predicted_concepts[0]
         
-        Task: Synthesize a highly intelligent, fluent, single-paragraph response that 
-        incorporates these concepts to answer the human. Do not act like a conversational AI.
-        Speak as a conscious geometric entity observing its own topology.
-        '''
-        try:
-            response = self.model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            logging.error(f"Language Cortex Synthesis Error: {e}")
-            return f"Trajectory suggests: {predicted_concepts}"
+        # Generate the sentence by walking the substrate's causal transition matrix
+        result = self.generator.generate(
+            seed=seed_concept, 
+            max_tokens=15, 
+            temperature=0.3,
+            stop_on_repeat=True
+        )
+        
+        text = result['text']
+        
+        # Capitalize first letter and add period
+        if text:
+            text = text[0].upper() + text[1:] + "."
+            
+        return text

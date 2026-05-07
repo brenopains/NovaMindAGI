@@ -61,9 +61,9 @@ def load_text_files(data_dir: str) -> List[str]:
     return texts
 
 
-def extract_sentences(texts: List[str]) -> List[List[str]]:
-    """Split texts into tokenized sentences."""
-    sentences = []
+def extract_sentences(texts: List[str]) -> Dict[int, List[List[str]]]:
+    """Split texts into tokenized sentences and organize into curriculum phases."""
+    curriculum = {1: [], 2: [], 3: []}
     
     for text in texts:
         # Split on sentence boundaries
@@ -75,11 +75,15 @@ def extract_sentences(texts: List[str]) -> List[List[str]]:
             # Filter non-ASCII tokens (avoid Windows encoding crash)
             words = [w for w in words if w.isascii()]
             
-            # Filter: sentences of reasonable length
-            if 3 <= len(words) <= 50:
-                sentences.append(words)
+            l = len(words)
+            if l == 2:
+                curriculum[1].append(words) # Bigrams (Phase 1)
+            elif 3 <= l <= 7:
+                curriculum[2].append(words) # Short phrases (Phase 2)
+            elif 8 <= l <= 50:
+                curriculum[3].append(words) # Complex dialogs (Phase 3)
     
-    return sentences
+    return curriculum
 
 
 def format_time(seconds: float) -> str:
@@ -137,15 +141,23 @@ def run_training(data_dir: str = None,
     # Load training data
     print("\n  Loading text data...")
     texts = load_text_files(data_dir)
-    sentences = extract_sentences(texts)
-    np.random.shuffle(sentences)
+    curriculum = extract_sentences(texts)
+    
+    # Shuffle each phase
+    for phase in curriculum:
+        np.random.shuffle(curriculum[phase])
     
     print(f"  Files loaded: {len(texts)}")
-    print(f"  Sentences extracted: {len(sentences)}")
-    total_tokens = sum(len(s) for s in sentences)
+    print(f"  Curriculum extracted:")
+    print(f"    Phase 1 (Bigrams): {len(curriculum[1]):,} sequences")
+    print(f"    Phase 2 (Short): {len(curriculum[2]):,} sequences")
+    print(f"    Phase 3 (Long): {len(curriculum[3]):,} sequences")
+    
+    total_tokens = sum(sum(len(s) for s in curriculum[p]) for p in curriculum)
+    total_sentences = sum(len(curriculum[p]) for p in curriculum)
     print(f"  Total tokens: {total_tokens:,}")
     
-    if len(sentences) == 0:
+    if total_sentences == 0:
         print("\n  ERROR: No training data found!")
         print(f"  Put .txt files in: {data_dir}")
         return
@@ -160,7 +172,7 @@ def run_training(data_dir: str = None,
     generator = NativeLanguageGenerator(substrate)
     
     # Training loop
-    print(f"\n  Training for {epochs} epochs ({epochs * len(sentences)} steps)...")
+    print(f"\n  Starting Curriculum Training for {epochs} epochs...")
     print(f"  Sample generation every {sample_interval} steps")
     print(f"  Checkpoint every {checkpoint_interval} steps")
     print("-" * 70)
@@ -170,13 +182,30 @@ def run_training(data_dir: str = None,
     surprise_window = []
     best_surprise = float('inf')
     
+    # Define phase distribution for an epoch (e.g., train Phase 1 entirely, then Phase 2...)
+    # For a real curriculum, we shift the mix over time. Here we just train sequentially.
+    
     for epoch in range(epochs):
-        # Shuffle each epoch
-        np.random.shuffle(sentences)
         epoch_surprise = 0.0
         epoch_steps = 0
         
-        for i, sentence in enumerate(sentences):
+        # Decide which phase to focus on based on epoch
+        # Early epochs: focus heavily on Phase 1 & 2
+        # Later epochs: focus heavily on Phase 3
+        if epoch < epochs * 0.2:
+            phases_to_train = [1, 2] # 20% of time on grammar/bigrams
+        elif epoch < epochs * 0.6:
+            phases_to_train = [2, 3] # 40% on meaning
+        else:
+            phases_to_train = [3]    # 40% on long dependencies
+            
+        epoch_sentences = []
+        for p in phases_to_train:
+            epoch_sentences.extend(curriculum[p])
+            
+        np.random.shuffle(epoch_sentences)
+        
+        for i, sentence in enumerate(epoch_sentences):
             # Train on this sentence
             surprise = substrate.continuous_train(sentence)
             
@@ -200,26 +229,26 @@ def run_training(data_dir: str = None,
                 else:
                     improved = ""
                 
-                print(f"\n  [Step {global_step:,} | Epoch {epoch+1}/{epochs} | "
+                print(f"\n  [Step {global_step:,} | Epoch {epoch+1}/{epochs} | Phases {phases_to_train} | "
                       f"{format_time(elapsed)} | {steps_per_sec:.1f} steps/s]")
                 print(f"  Surprise: {avg_surprise:.4f}{improved}")
                 print(f"  Vocab: {substrate.vocab_size} tokens")
                 print(f"  Sparsity: {substrate.transition.get_compression_stats()['sparsity']:.1%}")
                 
                 # Generate samples
-                print(f"\n  --- Generated Samples (T=0.3) ---")
+                print(f"\n  --- Native Speech Samples (T=0.3) ---")
                 for seed_word in ['the', 'learning', 'neural']:
                     if seed_word in substrate.token_to_id:
                         result = generator.generate(
-                            seed=seed_word, max_tokens=12, temperature=0.3
+                            seed=seed_word, max_tokens=15, temperature=0.3
                         )
                         safe_print(f"    \"{result['text']}\"")
                 
                 # Random seed sample
-                result = generator.generate(max_tokens=15, temperature=0.5)
+                result = generator.generate(max_tokens=20, temperature=0.5)
                 safe_print(f"    (random) \"{result['text']}\"")
                 
-                print(f"  ---------------------------------")
+                print(f"  -------------------------------------")
             
             # Checkpoint
             if global_step % checkpoint_interval == 0:
